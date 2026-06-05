@@ -37,6 +37,21 @@ secure channel. All protocol logic lives in the bash script.
 
 Override with `--socket PATH`, `--proxy`, or `--exec CMD` (see below).
 
+## Install
+
+`kpxc-agent` is a single script plus a small python helper in `lib/`. The script locates
+`lib/` relative to its own directory, so keep them together and put the repo on your
+`PATH` (a bare symlink onto `PATH` would break that lookup):
+
+```bash
+git clone https://github.com/max-win-at/keepassxc-cli-integration.git
+export PATH="$PWD/keepassxc-cli-integration:$PATH"   # add to ~/.bashrc / ~/.zshrc to persist
+kpxc-agent doctor
+```
+
+For agent/AI use, an Agent Skill that teaches this CLI lives in
+[`skills/keepassxc-secrets/`](skills/keepassxc-secrets/SKILL.md).
+
 ## Prerequisites
 
 - **`jq`** — `dnf install jq` · `apt install jq` · `pacman -S jq` · `apk add jq`

@@ -1,0 +1,52 @@
+name: Sync tool into skill bundle
+
+# The keepassxc-secrets Agent Skill is published to skill marketplaces (e.g.
+# agentskill.sh), which import the *skill directory* — so the skill must carry its own
+# copy of the CLI to be self-contained. To avoid a hand-maintained duplicate (and the
+# drift that comes with it), the canonical tool lives at the repo root and this workflow
+# regenerates the bundled copy under skills/keepassxc-secrets/scripts/ whenever the tool
+# changes, committing the result back so the marketplace import picks it up.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Only the canonical sources — NOT the generated scripts/ dir, so the
+      # commit-back below can't retrigger this workflow.
+      - 'kpxc-agent'
+      - 'lib/**'
+      - '.github/workflows/sync-skill-tool.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate skill bundle from canonical tool
+        run: |
+          set -euo pipefail
+          dest=skills/keepassxc-secrets/scripts
+          rm -rf "$dest/lib"
+          mkdir -p "$dest/lib"
+          cp kpxc-agent "$dest/kpxc-agent"
+          chmod +x "$dest/kpxc-agent"
+          cp lib/kpxc_channel.py lib/kpxc_bridge.py "$dest/lib/"
+
+      - name: Commit if the bundle changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- skills/keepassxc-secrets/scripts; then
+            echo "Bundle already up to date."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add skills/keepassxc-secrets/scripts
+          # [skip ci] is belt-and-suspenders; the paths filter already excludes scripts/.
+          git commit -m "chore: sync kpxc-agent into skill bundle [skip ci]"
+          git push
