@@ -8,7 +8,24 @@
 #
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+# Resolve the script's real location even when it is invoked through a symlink on PATH
+# (e.g. ~/.local/bin/kpxc-agent -> .../repo/kpxc-agent). BASH_SOURCE is then the symlink,
+# so lib/ must be located next to the *real* file. Prefer GNU `readlink -f`; fall back to
+# a portable walk for BSD/macOS where `readlink -f` is unavailable.
+_kpxc_resolve() {
+    local src real
+    if real="$(readlink -f -- "$1" 2>/dev/null)" && [ -n "$real" ]; then
+        printf '%s\n' "$real"; return
+    fi
+    src="$1"
+    while [ -L "$src" ]; do
+        local dir; dir="$(cd -- "$(dirname -- "$src")" >/dev/null 2>&1 && pwd)"
+        src="$(readlink -- "$src")"
+        case "$src" in /*) ;; *) src="$dir/$src";; esac
+    done
+    printf '%s\n' "$src"
+}
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(_kpxc_resolve "${BASH_SOURCE[0]}")")" >/dev/null 2>&1 && pwd)"
 CHANNEL="$SCRIPT_DIR/lib/kpxc_channel.py"
 BRIDGE="$SCRIPT_DIR/lib/kpxc_bridge.py"
 PY="${KPXC_PYTHON:-python3}"

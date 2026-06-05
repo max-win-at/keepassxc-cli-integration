@@ -39,13 +39,13 @@ Override with `--socket PATH`, `--proxy`, or `--exec CMD` (see below).
 
 ## Install
 
-`kpxc-agent` is a single script plus a small python helper in `lib/`. The script locates
-`lib/` relative to its own directory, so keep them together and put the repo on your
-`PATH` (a bare symlink onto `PATH` would break that lookup):
+`kpxc-agent` is a single script plus a small python helper in `lib/`. It resolves `lib/`
+relative to its own real location (following symlinks), so symlink it onto your `PATH` —
+or add the repo dir directly:
 
 ```bash
 git clone https://github.com/max-win-at/keepassxc-cli-integration.git
-export PATH="$PWD/keepassxc-cli-integration:$PATH"   # add to ~/.bashrc / ~/.zshrc to persist
+ln -s "$PWD/keepassxc-cli-integration/kpxc-agent" ~/.local/bin/kpxc-agent  # or: export PATH="$PWD/keepassxc-cli-integration:$PATH"
 kpxc-agent doctor
 ```
 
