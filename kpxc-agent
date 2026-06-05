@@ -1,0 +1,467 @@
+#!/usr/bin/env bash
+#
+# kpxc-agent - command-line client for the KeePassXC browser-integration protocol.
+#
+# This script owns all protocol logic. It builds action messages with jq, passes
+# them through the protocol-agnostic encrypted channel (lib/kpxc_channel.py), and
+# formats the decrypted replies for shell/agent consumption. See README.md.
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+CHANNEL="$SCRIPT_DIR/lib/kpxc_channel.py"
+BRIDGE="$SCRIPT_DIR/lib/kpxc_bridge.py"
+PY="${KPXC_PYTHON:-python3}"
+
+# Exit codes
+EX_USAGE=64      # bad invocation
+EX_UNREACH=2     # KeePassXC not reachable / database not opened
+EX_DENIED=3      # request refused, cancelled, or locked
+EX_NOASSOC=4     # no / invalid association
+EX_PROTO=5       # protocol or crypto failure
+
+# Global options (may appear before the subcommand)
+SOCKET="${KPXC_SOCKET:-}"       # direct unix-socket path
+EXEC="${KPXC_EXEC:-}"           # framed-stdio relay command (e.g. keepassxc-proxy)
+PROXY=0                         # --proxy: force a keepassxc-proxy relay (auto-detect binary)
+TRIGGER=0
+DEBUG="${KPXC_AGENT_DEBUG:-0}"
+SOCK_NAME="org.keepassxc.KeePassXC.BrowserServer"
+
+die() { local code="$1"; shift; printf 'kpxc-agent: %s\n' "$*" >&2; exit "$code"; }
+need() { command -v "$1" >/dev/null 2>&1; }
+
+# Single-quote a value so it is safe to `eval`/source.
+shq() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
+
+require_tools() {
+    need jq || die "$EX_USAGE" "'jq' not found. Install it: apt install jq | dnf install jq | pacman -S jq | apk add jq"
+    need "$PY" || die "$EX_USAGE" "'$PY' (python3) not found."
+    [[ -f "$CHANNEL" ]] || die "$EX_PROTO" "channel helper missing: $CHANNEL"
+}
+
+require_assoc() {
+    [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]] || die "$EX_NOASSOC" \
+        "Not associated. Set KPXC_ASSOC_ID and KPXC_ASSOC_KEY (run: kpxc-agent associate)."
+}
+
+# Locate a keepassxc-proxy binary; echoes a single-quoted exec string (or fails).
+# Prefers a Windows proxy when run from WSL (to reach a Windows KeePassXC), then a
+# local Linux proxy in PATH.
+detect_proxy() {
+    local pp
+    for pp in "${KPXC_WIN_KEEPASSXC:-/mnt/c/Program Files/KeePassXC}/keepassxc-proxy.exe" \
+              "/mnt/c/Program Files (x86)/KeePassXC/keepassxc-proxy.exe"; do
+        [[ -x "$pp" ]] && { printf "'%s'" "$pp"; return 0; }
+    done
+    pp="$(command -v keepassxc-proxy 2>/dev/null || true)"
+    [[ -n "$pp" ]] && { printf "'%s'" "$pp"; return 0; }
+    return 1
+}
+
+# Decide the transport when not given explicitly.
+resolve_transport() {
+    [[ -n "$EXEC" || -n "$SOCKET" ]] && return 0
+    if [[ "$PROXY" == 1 ]]; then
+        EXEC="$(detect_proxy)" || die "$EX_USAGE" "no keepassxc-proxy found; pass --exec PATH"
+        return 0
+    fi
+    local b
+    for b in "${XDG_RUNTIME_DIR:-}" "${TMPDIR:-}" /tmp; do
+        [[ -n "$b" && -S "$b/$SOCK_NAME" ]] && { SOCKET="$b/$SOCK_NAME"; return 0; }
+    done
+    # No local socket (e.g. KeePassXC runs on Windows): fall back to a proxy relay.
+    EXEC="$(detect_proxy)" || true
+}
+
+# Assemble channel arguments from globals.
+channel_cmd() {
+    local args=("$PY" "$CHANNEL" channel)
+    if [[ -n "$EXEC" ]]; then args+=(--exec "$EXEC")
+    elif [[ -n "$SOCKET" ]]; then args+=(--socket "$SOCKET"); fi
+    if [[ "$1" == "force-unlock" || "$TRIGGER" == 1 ]]; then args+=(--trigger-unlock); fi
+    printf '%s\0' "${args[@]}"
+}
+
+# Low-level: pipe stdin (newline-joined inner messages) through one channel
+# session; prints one compact JSON reply line per message, in order.
+channel_pipe() {
+    local unlock="${1:-}"
+    local cmd=()
+    while IFS= read -r -d '' a; do cmd+=("$a"); done < <(channel_cmd "$unlock")
+    "${cmd[@]}"
+}
+
+# run_action <inner-json> [force-unlock]  ->  prints the reply JSON.
+# For actions that need no association context (associate, lock, hash).
+run_action() {
+    local inner="$1" unlock="${2:-}"
+    [[ "$DEBUG" == 1 ]] && printf 'kpxc-agent: send %s\n' "$inner" >&2
+    printf '%s\n' "$inner" | channel_pipe "$unlock"
+}
+
+# run_assoc_action <inner-json> [force-unlock]  ->  prints the action reply JSON.
+# KeePassXC validates association per-connection, so credential/database actions
+# must be preceded by test-associate on the SAME connection (as the extension does).
+# Callers must have already run require_assoc. On a failed test-associate this emits
+# a synthetic errorCode-10 envelope so the caller's check_reply maps it to EX_NOASSOC
+# (dying here would be swallowed by command substitution).
+run_assoc_action() {
+    local inner="$1" unlock="${2:-}"
+    local ta out
+    ta=$(jq -nc --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" \
+        '{action:"test-associate", id:$id, key:$key}')
+    [[ "$DEBUG" == 1 ]] && printf 'kpxc-agent: send %s ; %s\n' "$ta" "$inner" >&2
+    out=$(printf '%s\n%s\n' "$ta" "$inner" | channel_pipe "$unlock") || return 1
+    if [[ "$(sed -n 1p <<<"$out" | jq -r '.success // empty')" == "true" ]]; then
+        sed -n 2p <<<"$out"
+    else
+        printf '%s\n' '{"error":"association invalid for the open database (run: kpxc-agent test)","errorCode":"10"}'
+    fi
+}
+
+# Inspect a decrypted reply; map KeePassXC error codes to exit codes.
+# Usage: check_reply <json>  (returns 0 on success, exits otherwise)
+check_reply() {
+    local reply="$1" ok code err
+    ok=$(jq -r '.success // empty' <<<"$reply")
+    code=$(jq -r '.errorCode // empty' <<<"$reply")
+    err=$(jq -r '.error // empty' <<<"$reply")
+    if [[ -n "$code" ]]; then
+        case "$code" in
+            1)      die "$EX_UNREACH" "database not opened (unlock KeePassXC or use --trigger-unlock)";;
+            6)      die "$EX_DENIED"  "action cancelled or denied in KeePassXC";;
+            8|9)    die "$EX_NOASSOC" "association failed: ${err:-key not accepted}";;
+            10)     die "$EX_NOASSOC" "association key not recognized for this database (re-associate)";;
+            *)      die "$EX_DENIED"  "KeePassXC error ${code}: ${err:-unknown}";;
+        esac
+    fi
+    [[ "$ok" == "true" || -z "$ok" ]] || die "$EX_DENIED" "request unsuccessful: ${err:-unknown}"
+}
+
+usage() {
+    cat <<'EOF'
+kpxc-agent - KeePassXC browser-integration protocol for the command line
+
+Usage: kpxc-agent [global options] <command> [args]
+
+Transport (auto-detected: local socket, else keepassxc-proxy; override as needed):
+  --socket PATH        Connect directly to a KeePassXC unix socket (env: KPXC_SOCKET)
+  --proxy              Relay through keepassxc-proxy (auto-finds the binary; reaches a
+                       KeePassXC running on Windows when invoked from WSL)
+  --exec CMD           Use CMD's stdio as a framed relay, e.g. a specific
+                       keepassxc-proxy path (env: KPXC_EXEC)
+
+Other global options:
+  --trigger-unlock     Ask KeePassXC to prompt for unlock if the database is locked
+  --debug              Print the plaintext messages being sent (env: KPXC_AGENT_DEBUG=1)
+  -h, --help           Show this help
+
+Commands:
+  associate                       One-time pairing; prints KPXC_ASSOC_ID / KPXC_ASSOC_KEY exports
+  test                            Verify the current association against the open database
+  get-logins URL [opts]           Fetch credentials matching URL
+      --submit-url URL  --http-auth  --field username|password|name|uuid|totp  --json
+  get-totp UUID                   Fetch the current TOTP for an entry
+  generate-password               Generate a password using KeePassXC's settings
+  set-login URL --username U --password P [--submit-url U] [--group G]
+      [--group-uuid X] [--uuid X] Create or update an entry
+  groups [--json]                 List database groups
+  create-group NAME               Create a new group (or path)
+  lock                            Lock the database
+  hash                            Print the active database hash
+  serve-bridge [--listen ADDR]    Expose local KeePassXC for ssh -R reverse forwarding
+                                  (run on the CLIENT; default ADDR 127.0.0.1:19455)
+  doctor                          Check prerequisites and socket availability
+
+Identity is taken from the environment:
+  KPXC_ASSOC_ID, KPXC_ASSOC_KEY   Produced by `associate`; not secret (public key + id)
+
+Example:
+  kpxc-agent --trigger-unlock associate            # then export the two vars it prints
+  eval "$(kpxc-agent get-logins https://host)"     # sets KPXC_USERNAME / KPXC_PASSWORD
+  pw=$(kpxc-agent get-logins https://host --field password)
+EOF
+}
+
+# ---- commands ---------------------------------------------------------------
+
+cmd_associate() {
+    require_tools
+    local idkey reply ok id hash
+    idkey=$("$PY" "$CHANNEL" keypair) || die "$EX_PROTO" "key generation failed"
+    local inner
+    inner=$(jq -nc --arg idkey "$idkey" '{action:"associate", key:"@CLIENTKEY@", idKey:$idkey}')
+    # associate always triggers unlock, mirroring the browser extension.
+    reply=$(run_action "$inner" force-unlock) || die "$EX_UNREACH" \
+        "KeePassXC unreachable (running? Browser Integration enabled?)"
+    ok=$(jq -r '.success // empty' <<<"$reply")
+    id=$(jq -r '.id // empty' <<<"$reply")
+    hash=$(jq -r '.hash // empty' <<<"$reply")
+    if [[ "$ok" != "true" || -z "$id" ]]; then
+        die "$EX_DENIED" "association failed or declined in KeePassXC: $(jq -c . <<<"$reply")"
+    fi
+    printf '# keepassxc-cli-agent associated with database %s\n' "$hash"
+    printf 'export KPXC_ASSOC_ID=%s\n' "$(shq "$id")"
+    printf 'export KPXC_ASSOC_KEY=%s\n' "$(shq "$idkey")"
+}
+
+cmd_test() {
+    require_tools; require_assoc
+    local inner reply
+    inner=$(jq -nc --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" \
+        '{action:"test-associate", id:$id, key:$key}')
+    reply=$(run_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
+    if [[ "$(jq -r '.success // empty' <<<"$reply")" == "true" ]]; then
+        printf 'Association valid (id=%s db=%s)\n' \
+            "$(jq -r '.id // ""' <<<"$reply")" "$(jq -r '.hash // ""' <<<"$reply")"
+    else
+        die "$EX_NOASSOC" "association invalid for the open database: $(jq -c . <<<"$reply")"
+    fi
+}
+
+emit_entry() { # <suffix> <entry-json>
+    local sfx="$1" e="$2"
+    printf 'KPXC_USERNAME%s=%s\n' "$sfx" "$(shq "$(jq -r '.login // ""'    <<<"$e")")"
+    printf 'KPXC_PASSWORD%s=%s\n' "$sfx" "$(shq "$(jq -r '.password // ""' <<<"$e")")"
+    printf 'KPXC_NAME%s=%s\n'     "$sfx" "$(shq "$(jq -r '.name // ""'     <<<"$e")")"
+    printf 'KPXC_UUID%s=%s\n'     "$sfx" "$(shq "$(jq -r '.uuid // ""'     <<<"$e")")"
+}
+
+cmd_get_logins() {
+    local url="" submit="" httpauth="" field="" want_json=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --submit-url) submit="${2:?}"; shift 2;;
+            --http-auth)  httpauth="true"; shift;;
+            --field)      field="${2:?}"; shift 2;;
+            --json)       want_json=1; shift;;
+            -*)           die "$EX_USAGE" "get-logins: unknown option $1";;
+            *)            url="$1"; shift;;
+        esac
+    done
+    [[ -n "$url" ]] || die "$EX_USAGE" "get-logins: URL required"
+    case "$field" in
+        ""|username|password|name|uuid|totp) ;;
+        *) die "$EX_USAGE" "get-logins: unknown --field '$field' (use username|password|name|uuid|totp)";;
+    esac
+    require_tools; require_assoc
+    local inner reply
+    inner=$(jq -nc --arg url "$url" --arg sub "$submit" --arg ha "$httpauth" \
+        --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" '
+        {action:"get-logins", id:$id, url:$url, keys:[{id:$id, key:$key}]}
+        | (if $sub != "" then .submitUrl=$sub else . end)
+        | (if $ha  != "" then .httpAuth=$ha  else . end)')
+    reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
+    # errorCode 15 = no logins found: treat as a clean empty result.
+    if [[ "$(jq -r '.errorCode // empty' <<<"$reply")" == "15" ]]; then
+        [[ "$want_json" == 1 ]] && echo "[]"
+        return 0
+    fi
+    check_reply "$reply"
+
+    if [[ "$want_json" == 1 ]]; then jq -c '.entries // []' <<<"$reply"; return 0; fi
+    if [[ -n "$field" ]]; then
+        local sel
+        case "$field" in
+            username) sel='.login';;  password) sel='.password';;
+            name)     sel='.name';;   uuid)     sel='.uuid';;  totp) sel='.totp';;
+            *)        die "$EX_USAGE" "get-logins: unknown --field $field";;
+        esac
+        jq -r ".entries[0] | (${sel} // \"\")" <<<"$reply"
+        return 0
+    fi
+    local count; count=$(jq -r '.entries | length' <<<"$reply")
+    case "$count" in
+        0) return 0;;
+        1) emit_entry "" "$(jq -c '.entries[0]' <<<"$reply")";;
+        *) printf 'KPXC_COUNT=%s\n' "$count"
+           local i=0
+           while [[ $i -lt $count ]]; do emit_entry "_$i" "$(jq -c ".entries[$i]" <<<"$reply")"; i=$((i+1)); done;;
+    esac
+}
+
+cmd_get_totp() {
+    local uuid="${1:-}"; [[ -n "$uuid" ]] || die "$EX_USAGE" "get-totp: UUID required"
+    require_tools; require_assoc
+    local inner reply
+    inner=$(jq -nc --arg u "$uuid" '{action:"get-totp", uuid:$u}')
+    reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
+    check_reply "$reply"
+    printf 'KPXC_TOTP=%s\n' "$(shq "$(jq -r '.totp // ""' <<<"$reply")")"
+}
+
+cmd_generate_password() {
+    require_tools; require_assoc
+    local inner reply pw
+    inner=$(jq -nc --arg rid "$(printf '%08x' $((RANDOM*RANDOM)))" \
+        '{action:"generate-password", requestID:$rid}')
+    reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
+    check_reply "$reply"
+    # KeePassXC returns the generated password under .password (older builds: .entries).
+    pw=$(jq -r 'if (.entries|type)=="string" then .entries else (.password // .entries[0].password // "") end' <<<"$reply")
+    printf 'KPXC_PASSWORD=%s\n' "$(shq "$pw")"
+}
+
+cmd_set_login() {
+    local url="" user="" pass="" submit="" group="" guuid="" uuid=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --username)   user="${2:?}"; shift 2;;
+            --password)   pass="${2:?}"; shift 2;;
+            --submit-url) submit="${2:?}"; shift 2;;
+            --group)      group="${2:?}"; shift 2;;
+            --group-uuid) guuid="${2:?}"; shift 2;;
+            --uuid)       uuid="${2:?}"; shift 2;;
+            -*)           die "$EX_USAGE" "set-login: unknown option $1";;
+            *)            url="$1"; shift;;
+        esac
+    done
+    [[ -n "$url" && -n "$user" ]] || die "$EX_USAGE" "set-login: URL and --username required"
+    require_tools; require_assoc
+    local inner reply
+    inner=$(jq -nc --arg url "$url" --arg sub "${submit:-$url}" --arg id "$KPXC_ASSOC_ID" \
+        --arg login "$user" --arg pw "$pass" --arg group "$group" --arg guuid "$guuid" --arg uuid "$uuid" '
+        {action:"set-login", id:$id, url:$url, submitUrl:$sub, login:$login, password:$pw}
+        | (if $group != "" then .group=$group else . end)
+        | (if $guuid != "" then .groupUuid=$guuid else . end)
+        | (if $uuid  != "" then .uuid=$uuid else . end)')
+    reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
+    check_reply "$reply"
+    echo "Saved."
+}
+
+cmd_groups() {
+    local want_json=0
+    [[ "${1:-}" == "--json" ]] && want_json=1
+    require_tools; require_assoc
+    local reply; reply=$(run_assoc_action '{"action":"get-database-groups"}') || die "$EX_UNREACH" "KeePassXC unreachable."
+    check_reply "$reply"
+    # KeePassXC nests the root groups under .groups.groups (older docs show .groups).
+    if [[ "$want_json" == 1 ]]; then jq -c '(.groups.groups // .groups) // []' <<<"$reply"; return 0; fi
+    # Print "uuid<TAB>name-path" for each group, depth-first.
+    jq -r '
+        def walk($prefix):
+            ($prefix + .name) as $p
+            | (.uuid + "\t" + $p),
+              (.children[]? | walk($p + "/"));
+        (.groups.groups // .groups)[]? | walk("")' <<<"$reply"
+}
+
+cmd_create_group() {
+    local name="${1:-}"; [[ -n "$name" ]] || die "$EX_USAGE" "create-group: NAME required"
+    require_tools; require_assoc
+    local inner reply
+    inner=$(jq -nc --arg n "$name" '{action:"create-new-group", groupName:$n}')
+    reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
+    check_reply "$reply"
+    printf '%s\t%s\n' "$(jq -r '.uuid // ""' <<<"$reply")" "$(jq -r '.name // ""' <<<"$reply")"
+}
+
+cmd_lock() {
+    require_tools
+    local reply; reply=$(run_action '{"action":"lock-database"}') || die "$EX_UNREACH" "KeePassXC unreachable."
+    # lock-database replies with an error envelope by design; treat reaching it as success.
+    echo "Lock requested."
+}
+
+cmd_hash() {
+    require_tools
+    local reply; reply=$(run_action '{"action":"get-databasehash"}' ) || die "$EX_UNREACH" "KeePassXC unreachable."
+    check_reply "$reply"
+    jq -r '.hash // ""' <<<"$reply"
+}
+
+# serve-bridge: expose the local KeePassXC transport as a listening endpoint so it
+# can be reverse-forwarded over ssh (`ssh -R`) to a remote box. Run this on the
+# CLIENT (where KeePassXC lives); the box then uses `kpxc-agent --socket <forwarded>`.
+# Reuses the already-resolved transport (SOCKET or EXEC), so it works the same on a
+# Linux/macOS client (relays the unix socket) and a Windows/WSL client (relays
+# keepassxc-proxy.exe). Listens on 127.0.0.1:19455 by default (a `ssh -R` can map a
+# box-side unix socket onto it on any client OS); override with --listen.
+cmd_serve_bridge() {
+    require_tools
+    [[ -f "$BRIDGE" ]] || die "$EX_PROTO" "bridge helper missing: $BRIDGE"
+    local listen="127.0.0.1:19455"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --listen) listen="${2:?}"; shift 2;;
+            -*)       die "$EX_USAGE" "serve-bridge: unknown option $1";;
+            *)        die "$EX_USAGE" "serve-bridge: unexpected argument '$1'";;
+        esac
+    done
+    local args=("$PY" "$BRIDGE" --listen "$listen")
+    if [[ -n "$EXEC" ]]; then args+=(--exec "$EXEC")
+    elif [[ -n "$SOCKET" ]]; then args+=(--socket "$SOCKET")
+    else die "$EX_UNREACH" "no local KeePassXC transport found (start KeePassXC, or pass --socket/--exec/--proxy)"; fi
+    exec "${args[@]}"
+}
+
+cmd_doctor() {
+    local ok=0 reply
+    printf 'keepassxc-cli-agent doctor\n'
+    if need jq; then printf '  [ok]   jq: %s\n' "$(command -v jq)"; else
+        printf '  [MISS] jq  -> apt install jq | dnf install jq | pacman -S jq | apk add jq\n'; ok=1; fi
+    if need "$PY"; then printf '  [ok]   python3: %s\n' "$(command -v "$PY")"; else
+        printf '  [MISS] python3\n'; ok=1; fi
+    if "$PY" "$CHANNEL" keypair >/dev/null 2>&1; then printf '  [ok]   libsodium loadable via ctypes\n'; else
+        printf '  [MISS] libsodium -> apt install libsodium23 | dnf install libsodium | pacman -S libsodium | apk add libsodium\n'; ok=1; fi
+    # Report the transport and probe reachability.
+    if [[ -n "$EXEC" ]]; then
+        printf '  [info] transport: relay (%s)\n' "$EXEC"
+        if reply=$(run_action '{"action":"get-databasehash"}' 2>/dev/null) && [[ -n "$reply" ]]; then
+            printf '  [ok]   KeePassXC reachable through relay (db %s)\n' "$(jq -r '.hash // "?"' <<<"$reply" 2>/dev/null)"
+        else
+            printf '  [warn] relay set but KeePassXC did not respond (running? pipe name correct?)\n'
+        fi
+    else
+        local sp="${SOCKET:-}"
+        if [[ -z "$sp" ]]; then
+            for b in "${XDG_RUNTIME_DIR:-}" "${TMPDIR:-}" /tmp; do
+                [[ -n "$b" && -S "$b/org.keepassxc.KeePassXC.BrowserServer" ]] && sp="$b/org.keepassxc.KeePassXC.BrowserServer" && break
+            done
+        fi
+        if [[ -n "$sp" && -S "$sp" ]]; then printf '  [ok]   socket: %s\n' "$sp"; else
+            printf '  [warn] KeePassXC socket not found (start KeePassXC and enable Browser Integration)\n'; fi
+    fi
+    [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]] \
+        && printf '  [ok]   association vars present (KPXC_ASSOC_ID/KEY)\n' \
+        || printf '  [info] no KPXC_ASSOC_ID/KEY in env (run: kpxc-agent associate)\n'
+    return $ok
+}
+
+# ---- dispatch ---------------------------------------------------------------
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --socket)         SOCKET="${2:?}"; shift 2;;
+        --exec)           EXEC="${2:?}"; shift 2;;
+        --proxy)          PROXY=1; shift;;
+        --trigger-unlock) TRIGGER=1; shift;;
+        --debug)          DEBUG=1; shift;;
+        -h|--help|help)   usage; exit 0;;
+        --) shift; break;;
+        -*) die "$EX_USAGE" "unknown global option $1";;
+        *) break;;
+    esac
+done
+
+resolve_transport
+
+cmd="${1:-}"; [[ $# -gt 0 ]] && shift || true
+case "$cmd" in
+    associate)          cmd_associate "$@";;
+    test)               cmd_test "$@";;
+    get-logins)         cmd_get_logins "$@";;
+    get-totp)           cmd_get_totp "$@";;
+    generate-password)  cmd_generate_password "$@";;
+    set-login)          cmd_set_login "$@";;
+    groups)             cmd_groups "$@";;
+    create-group)       cmd_create_group "$@";;
+    lock)               cmd_lock "$@";;
+    hash)               cmd_hash "$@";;
+    serve-bridge)       cmd_serve_bridge "$@";;
+    doctor)             cmd_doctor "$@";;
+    ""|help|-h|--help)  usage; exit 0;;
+    *)                  die "$EX_USAGE" "unknown command '$cmd' (try: kpxc-agent --help)";;
+esac

@@ -1,0 +1,17 @@
+.idea
+
+*.swp
+*~
+*.tmp
+
+*.zip
+*.crx
+.bz
+.bz2
+.xz
+node_modules
+test-results
+__pycache__
+*.log
+*.bak
+*.tmp
