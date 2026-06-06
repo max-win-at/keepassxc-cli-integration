@@ -91,11 +91,18 @@ stale — re-run `associate`.
 
 All of these assume `KPXC_ASSOC_ID` / `KPXC_ASSOC_KEY` are set.
 
-**URL scheme required**: `get-logins` and `set-login` need a full URL including scheme. Use
-`https://hostname` for virtually all real KeePassXC entries. A bare hostname (`hostname`,
-`service-name`) will never match — KeePassXC won't find the entry. `kpxc-agent` automatically
-prepends `https://` when no scheme is present, so `github.com` becomes `https://github.com`.
-When in doubt, pass the full URL explicitly.
+**Constructing the lookup URL**: KeePassXC matches credentials by URL — not by service name
+or keyword. Always build an explicit `https://` URL before calling `get-logins` or
+`set-login`:
+
+- If the user says "the GitHub password" → use `https://github.com`
+- If the user says "myserver.local postgres" → use `https://myserver.local`
+- If you don't know the exact URL stored in KeePassXC → **ask the user** before
+  proceeding: *"What URL is this credential stored under in KeePassXC?"*
+
+A service name without a proper domain (e.g. `github` instead of `github.com`) will not
+match even with `https://` prepended. `kpxc-agent` auto-prepends `https://` to bare
+hostnames as a safety net, but you must still supply the correct domain.
 
 **Fetch a single password (most common):**
 ```bash
