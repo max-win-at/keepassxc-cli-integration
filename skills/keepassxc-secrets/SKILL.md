@@ -1,13 +1,12 @@
 ---
 name: keepassxc-secrets
 description: >
-  Fetch, generate, or store credentials (passwords, usernames, TOTP) from a user's
-  KeePassXC vault via the `kpxc-agent` CLI. Use this whenever a task needs a secret
-  that lives in KeePassXC — provisioning or commissioning a Linux box or SBC, wiring
-  up a service that needs a DB/API/SSH password, saving a freshly generated credential,
-  or reading a TOTP — locally or over SSH. Trigger even when the user doesn't name
-  KeePassXC explicitly but clearly needs a secret "from my vault / password manager",
-  or asks you to generate and save a password rather than inventing one yourself.
+  Fetches, generates, or stores credentials (passwords, usernames, TOTP) from a
+  KeePassXC vault via the `kpxc-agent` CLI. Activate when a task needs a secret from
+  KeePassXC — provisioning or commissioning a Linux box or SBC, wiring up a service
+  that needs a DB/API/SSH password, saving a freshly generated credential, or reading
+  a TOTP — locally or over SSH. Also activates when the user mentions "my vault" or
+  "password manager", or asks to generate and save a password rather than inventing one.
 ---
 
 # KeePassXC secrets via kpxc-agent

@@ -52,6 +52,21 @@ kpxc-agent doctor
 For agent/AI use, an Agent Skill that teaches this CLI lives in
 [`skills/keepassxc-secrets/`](skills/keepassxc-secrets/SKILL.md).
 
+### Installing the skill
+
+**Harnesses with [agentskill.sh](https://agentskill.sh)** (Claude Code, Copilot CLI, Gemini CLI):
+
+Once published, one command installs it:
+```
+/learn @maxwin/keepassxc-secrets
+```
+Until published: copy the `skills/keepassxc-secrets/` directory into your harness's skills
+directory (e.g. `~/.claude/skills/` for Claude Code) and the harness will pick it up.
+
+**Harnesses without agentskill.sh** (Cursor, Codex CLI, bare Copilot, etc.):
+Paste the contents of `skills/keepassxc-secrets/SKILL.md` into the harness's
+custom-instructions or rules file.
+
 ## Prerequisites
 
 - **`jq`** — `dnf install jq` · `apt install jq` · `pacman -S jq` · `apk add jq`
