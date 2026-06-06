@@ -124,7 +124,7 @@ run_action() {
 # a synthetic errorCode-10 envelope so the caller's check_reply maps it to EX_NOASSOC
 # (dying here would be swallowed by command substitution).
 run_assoc_action() {
-    local inner="$1" unlock="${2:-}"
+    local inner="$1" unlock="${2:-force-unlock}"
     local ta out
     ta=$(jq -nc --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" \
         '{action:"test-associate", id:$id, key:$key}')
