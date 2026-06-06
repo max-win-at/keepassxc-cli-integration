@@ -29,9 +29,11 @@ import ctypes
 import ctypes.util
 import json
 import os
+import select
 import socket
 import struct
 import sys
+import time
 
 PK_BYTES = 32     # crypto_box public key
 SK_BYTES = 32     # crypto_box secret key
@@ -221,13 +223,9 @@ class Channel:
             die("key exchange failed: %s" % json.dumps(response))
         self.server_pk = b64d(response["publicKey"])
 
-    def request(self, inner_line):
-        if self.server_pk is None:
-            self.handshake()
-
-        inner_line = inner_line.replace("@CLIENTKEY@", b64e(self.client_pk))
-        inner = json.loads(inner_line)
-
+    def _send_request_recv(self, inner, inner_line):
+        """Send one encrypted request envelope; return (nonce, response_dict).
+        Skips unsolicited database-locked/unlocked signals and empty ack frames."""
         nonce = os.urandom(NONCE_BYTES)
         ciphertext = box(inner_line.encode("utf-8"), nonce, self.server_pk, self.client_sk)
         envelope = {
@@ -241,11 +239,9 @@ class Channel:
         if "requestID" in inner:  # used by generate-password; echoed at envelope level
             envelope["requestID"] = inner["requestID"]
         self._send(envelope)
-
         # Read the reply, skipping frames that are not the answer to this request:
         # unsolicited database-locked/unlocked signals, and the empty "{}" ack that
         # KeePassXC sends before some replies (e.g. generate-password emits {} first).
-        response = None
         for _ in range(8):
             response = self._recv_json()
             if response.get("action") in ("database-locked", "database-unlocked") \
@@ -254,9 +250,55 @@ class Channel:
             if "message" not in response and "error" not in response \
                     and "errorCode" not in response:
                 continue  # empty/ack frame; the real reply follows
-            break
-        else:
-            die("no usable reply from KeePassXC")
+            return nonce, response
+        die("no usable reply from KeePassXC")
+
+    def _wait_for_database_unlocked(self, timeout=60):
+        """Block until KeePassXC broadcasts database-unlocked, or timeout expires.
+        Returns True on unlock, False on timeout or closed connection."""
+        fd = None
+        if hasattr(self.transport, 'sock'):
+            try:
+                fd = self.transport.sock.fileno()
+            except Exception:
+                pass
+        elif hasattr(self.transport, 'proc'):
+            try:
+                fd = self.transport.proc.stdout.fileno()
+            except Exception:
+                pass
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            if fd is not None:
+                ready, _, _ = select.select([fd], [], [], remaining)
+                if not ready:
+                    return False
+            try:
+                frame = self._recv_json()
+            except OSError:
+                return False
+            if frame.get("action") == "database-unlocked" and "message" not in frame:
+                return True
+
+    def request(self, inner_line):
+        if self.server_pk is None:
+            self.handshake()
+
+        inner_line = inner_line.replace("@CLIENTKEY@", b64e(self.client_pk))
+        inner = json.loads(inner_line)
+
+        nonce, response = self._send_request_recv(inner, inner_line)
+
+        # triggerUnlock was sent: KeePassXC showed the unlock dialog and returned
+        # errorCode 1 immediately (it does not hold the request).  Keep the
+        # connection alive, wait for the database-unlocked broadcast, then retry
+        # once — this is what the browser extension does.
+        if self.trigger_unlock and response.get("errorCode") == "1":
+            if self._wait_for_database_unlocked():
+                nonce, response = self._send_request_recv(inner, inner_line)
 
         if "message" not in response or "nonce" not in response:
             # Error envelope (e.g. errorCode/error) - hand it to bash verbatim.
