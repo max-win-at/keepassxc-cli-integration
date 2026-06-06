@@ -51,6 +51,9 @@ need() { command -v "$1" >/dev/null 2>&1; }
 # Single-quote a value so it is safe to `eval`/source.
 shq() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
 
+# Ensure URL has a scheme; default to https:// for bare hostnames.
+normalize_url() { case "$1" in *://*) printf '%s' "$1";; *) printf 'https://%s' "$1";; esac; }
+
 require_tools() {
     need jq || die "$EX_USAGE" "'jq' not found. Install it: apt install jq | dnf install jq | pacman -S jq | apk add jq"
     need "$PY" || die "$EX_USAGE" "'$PY' (python3) not found."
@@ -258,6 +261,7 @@ cmd_get_logins() {
         esac
     done
     [[ -n "$url" ]] || die "$EX_USAGE" "get-logins: URL required"
+    url=$(normalize_url "$url")
     case "$field" in
         ""|username|password|name|uuid|totp) ;;
         *) die "$EX_USAGE" "get-logins: unknown --field '$field' (use username|password|name|uuid|totp)";;
@@ -335,6 +339,7 @@ cmd_set_login() {
         esac
     done
     [[ -n "$url" && -n "$user" ]] || die "$EX_USAGE" "set-login: URL and --username required"
+    url=$(normalize_url "$url")
     require_tools; require_assoc
     local inner reply
     inner=$(jq -nc --arg url "$url" --arg sub "${submit:-$url}" --arg id "$KPXC_ASSOC_ID" \

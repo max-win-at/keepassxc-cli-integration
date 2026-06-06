@@ -18,13 +18,18 @@ browser extension uses. Reach for it instead of inventing passwords, hardcoding
 placeholders, or asking the user to paste secrets into the chat.
 
 This skill **bundles the tool** at `scripts/kpxc-agent` (relative to this skill's
-directory). The recipes below call it as `kpxc-agent`; if it isn't already on `PATH`, put
-the bundle there first — substitute this skill's actual directory for `<skill-dir>`:
+directory). The recipes below call it as `kpxc-agent`; if it isn't already on `PATH`
+(`command -v kpxc-agent` to check), resolve it once — substitute this skill's actual
+directory for `<skill-dir>`:
 
 ```bash
-export PATH="<skill-dir>/scripts:$PATH"
-chmod +x "<skill-dir>/scripts/kpxc-agent"
+kpxc_bin="<skill-dir>/scripts/kpxc-agent"
+[ -x "$kpxc_bin" ] || chmod +x "$kpxc_bin"
 ```
+
+Shell state does not persist between tool calls. Use the full resolved path (`"$kpxc_bin"`)
+in every subsequent Bash block — do not rely on `PATH`. If `kpxc-agent` is already on PATH,
+use it directly and skip this block entirely.
 
 Either way it needs `jq`, `python3`, and `libsodium` on the machine where it runs (these
 are system packages, not bundled). Source and full docs:
@@ -48,7 +53,8 @@ So:
 
 ## Step 1 — Check reachability
 
-Before anything else, confirm KeePassXC is reachable and the prerequisites are present:
+Run `kpxc-agent doctor` **once** when first setting up, or when troubleshooting a
+connectivity problem. Skip it if reachability was already confirmed in this session.
 
 ```bash
 kpxc-agent doctor
@@ -84,6 +90,12 @@ stale — re-run `associate`.
 ## Step 3 — Common recipes
 
 All of these assume `KPXC_ASSOC_ID` / `KPXC_ASSOC_KEY` are set.
+
+**URL scheme required**: `get-logins` and `set-login` need a full URL including scheme. Use
+`https://hostname` for virtually all real KeePassXC entries. A bare hostname (`hostname`,
+`service-name`) will never match — KeePassXC won't find the entry. `kpxc-agent` automatically
+prepends `https://` when no scheme is present, so `github.com` becomes `https://github.com`.
+When in doubt, pass the full URL explicitly.
 
 **Fetch a single password (most common):**
 ```bash
