@@ -278,7 +278,7 @@ class Channel:
                     return False
             try:
                 frame = self._recv_json()
-            except OSError:
+            except (OSError, SystemExit):
                 return False
             if frame.get("action") == "database-unlocked" and "message" not in frame:
                 return True
@@ -296,7 +296,7 @@ class Channel:
         # errorCode 1 immediately (it does not hold the request).  Keep the
         # connection alive, wait for the database-unlocked broadcast, then retry
         # once — this is what the browser extension does.
-        if self.trigger_unlock and response.get("errorCode") == "1":
+        if self.trigger_unlock and str(response.get("errorCode", "")) == "1":
             if self._wait_for_database_unlocked():
                 nonce, response = self._send_request_recv(inner, inner_line)
 
