@@ -55,9 +55,14 @@ kpxc-agent doctor
 ```
 
 This reports `jq`/`python3`/`libsodium`, the chosen transport (local socket, proxy
-relay, or a forwarded socket), and whether KeePassXC answers. If it can't reach
-KeePassXC, the database is probably locked or Browser Integration is disabled — tell
-the user; you can't unlock it for them.
+relay, or a forwarded socket), and whether KeePassXC answers. If it can't find the
+socket, KeePassXC isn't running or Browser Integration is disabled — tell the user.
+
+`doctor` checks transport only; it does NOT verify that the database is unlocked. A
+locked database still has an open socket, so `doctor` can succeed while the DB is
+locked. That's fine: credential commands automatically send `triggerUnlock` to
+KeePassXC (matching browser-extension behavior), so KeePassXC will show its unlock
+dialog and wait for the user before returning credentials.
 
 ## Step 2 — One-time pairing (association)
 
@@ -127,7 +132,7 @@ Don't just check for zero — the codes tell you what to do next:
 | Code | Meaning | What to do |
 |------|---------|------------|
 | 0 | success | proceed |
-| 2 | KeePassXC unreachable / DB not opened | ask the user to open/unlock KeePassXC; re-run `doctor` |
+| 2 | KeePassXC unreachable (no socket / Browser Integration disabled) | ask the user to start KeePassXC and enable Browser Integration; re-run `doctor` |
 | 3 | request refused, cancelled, or locked | the user declined the dialog or the DB locked — ask them |
 | 4 | no/invalid association | set/refresh `KPXC_ASSOC_*` via `associate` |
 | 5 | protocol or crypto failure | likely a version/transport issue; check `doctor`, retry with `--debug` |
