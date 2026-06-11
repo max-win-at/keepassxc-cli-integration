@@ -67,10 +67,17 @@ if command -v jq >/dev/null 2>&1; then
     MOCK=$!
     for _ in $(seq 1 50); do [[ -S "$SOCK" ]] && break; sleep 0.05; done
     export KPXC_SOCKET="$SOCK"
+    # Isolate the persisted association store so the suite never touches the real
+    # ~/.config and can verify store-backed reuse.
+    export XDG_CONFIG_HOME="$(mktemp -d /tmp/kpxc_cfg.XXXXXX)"
 
     A=$("$AGENT" associate 2>/dev/null) && eval "$A" \
         && [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]] \
         && ok "e2e: associate yields KPXC_ASSOC_ID/KEY" || bad "e2e: associate failed"
+
+    # associate persists to the store keyed by db hash, like the browser keyRing.
+    [[ -f "$XDG_CONFIG_HOME/keepassxc-cli-agent/associations.json" ]] \
+        && ok "e2e: associate persists to the store" || bad "e2e: associate did not persist"
 
     "$AGENT" test >/dev/null 2>&1 && ok "e2e: test-associate valid" || bad "e2e: test failed"
 
@@ -92,6 +99,32 @@ if command -v jq >/dev/null 2>&1; then
     "$AGENT" groups 2>/dev/null | grep -q $'\tRoot/Servers' \
         && ok "e2e: groups walks nested tree" || bad "e2e: groups"
 
+    # Persisted association: a clean env (no KPXC_ASSOC_*) reuses the stored pairing
+    # via the resolver, so no re-association is needed (the Problem-2 fix).
+    if spw=$(env -u KPXC_ASSOC_ID -u KPXC_ASSOC_KEY KPXC_SOCKET="$SOCK" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" \
+            "$AGENT" get-logins https://box.example --field password 2>/dev/null) \
+        && [[ "$spw" == "p'q\"x y" ]]; then
+        ok "e2e: persisted association reused without env vars"
+    else
+        bad "e2e: store-backed reuse (spw=${spw:-})"
+    fi
+
+    # Locked/closed database: get-databasehash(triggerUnlock) preamble must wait for
+    # the unlock broadcast and then proceed (the Problem-1 fix). A second mock starts
+    # "locked" and unlocks itself ~0.3s after the first hash request.
+    LSOCK="$(mktemp -u /tmp/kpxc_locked.XXXXXX.sock)"
+    KPXC_MOCK_LOCKED=1 "$PY" "$HERE/mock_kpxc.py" "$LSOCK" 2>/dev/null &
+    LMOCK=$!
+    for _ in $(seq 1 50); do [[ -S "$LSOCK" ]] && break; sleep 0.05; done
+    if lpw=$(KPXC_SOCKET="$LSOCK" KPXC_ASSOC_ID=mock KPXC_ASSOC_KEY=x \
+            "$AGENT" get-logins https://box.example --field password 2>/dev/null) \
+        && [[ "$lpw" == "p'q\"x y" ]]; then
+        ok "e2e: locked database triggers unlock-wait then returns creds"
+    else
+        bad "e2e: locked-DB unlock-wait (lpw=${lpw:-})"
+    fi
+    kill "$LMOCK" 2>/dev/null; wait "$LMOCK" 2>/dev/null || true; rm -f "$LSOCK"
+
     # 6. Bridge round-trip: serve-bridge relays a forwarded unix socket (BSOCK) to
     #    the mock (SOCK), standing in for the ssh -R hop. The agent talks to BSOCK
     #    exactly as the remote box would talk to its forwarded endpoint.
@@ -110,7 +143,8 @@ if command -v jq >/dev/null 2>&1; then
     rm -f "$BSOCK"
 
     kill "$MOCK" 2>/dev/null; wait "$MOCK" 2>/dev/null || true
-    rm -f "$SOCK"; unset KPXC_SOCKET KPXC_ASSOC_ID KPXC_ASSOC_KEY KPXC_PASSWORD
+    rm -f "$SOCK"; rm -rf "$XDG_CONFIG_HOME"
+    unset KPXC_SOCKET KPXC_ASSOC_ID KPXC_ASSOC_KEY KPXC_PASSWORD XDG_CONFIG_HOME
 else
     printf '  [skip] e2e tests need jq\n'
 fi

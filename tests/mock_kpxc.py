@@ -7,7 +7,7 @@ association (get-logins refuses until test-associate has run on the connection),
 the empty-ack frame that precedes a generate-password reply. Listens on an AF_UNIX
 socket (argv[1]).
 """
-import base64, ctypes, ctypes.util, json, os, socket, struct, sys, threading
+import base64, ctypes, ctypes.util, json, os, socket, struct, sys, threading, time
 
 NONCE, MAC = 24, 16
 S = ctypes.CDLL(ctypes.util.find_library("sodium") or "libsodium.so.26"); S.sodium_init()
@@ -43,6 +43,11 @@ def inc(n):
 
 HOST_PK, HOST_SK = keypair()
 DBHASH = "abc123deadbeef"
+# When KPXC_MOCK_LOCKED is set, start with no database "open": the first
+# get-databasehash returns errorCode 1 (as a locked/closed KeePassXC does), then a
+# database-unlocked broadcast is sent shortly after so the agent's triggerUnlock
+# wait succeeds and it retries. This exercises the unlock-on-locked/closed path.
+LOCKED = [bool(os.environ.get("KPXC_MOCK_LOCKED"))]
 DBGROUPS = {"groups": {"defaultGroup": "Root", "defaultGroupAlwaysAllow": False,
                        "groups": [{"name": "Root", "uuid": "r",
                                    "children": [{"name": "Servers", "uuid": "s", "children": []}]}]}}
@@ -93,7 +98,21 @@ def handle(conn):
             associated[0] = True
             reply_encrypted(action, {"version": "2.7.0", "hash": DBHASH, "id": "mock", "success": "true"}, rn)
         elif action == "get-databasehash":
-            reply_encrypted(action, {"action": "hash", "hash": DBHASH, "version": "2.7.0"}, rn)
+            if LOCKED[0]:
+                # Refuse while locked, then unlock shortly so the agent's
+                # triggerUnlock wait wakes and retries on this same connection.
+                send({"action": action, "errorCode": "1", "error": "Database not opened"})
+
+                def _unlock():
+                    time.sleep(0.3)
+                    LOCKED[0] = False
+                    try:
+                        send({"action": "database-unlocked"})
+                    except OSError:
+                        pass
+                threading.Thread(target=_unlock, daemon=True).start()
+            else:
+                reply_encrypted(action, {"action": "hash", "hash": DBHASH, "version": "2.7.0"}, rn)
         elif action == "get-logins":
             if not associated[0]:
                 send({"action": action, "error": "association failed", "errorCode": "8"})

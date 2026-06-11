@@ -54,15 +54,116 @@ shq() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
 # Ensure URL has a scheme; default to https:// for bare hostnames.
 normalize_url() { case "$1" in *://*) printf '%s' "$1";; *) printf 'https://%s' "$1";; esac; }
 
+# ---- association store ------------------------------------------------------
+# Persist associations like the browser keyRing: a JSON map keyed by database
+# hash -> {id, idKey, created, lastUsed}. The contents are NOT secret (a public
+# idKey plus a connection name), mirroring the extension's unencrypted
+# storage.local. This is what makes pairing one-time: later runs reload and reuse
+# the stored association via test-associate instead of prompting to re-associate.
+store_path() {
+    printf '%s/keepassxc-cli-agent/associations.json' "${XDG_CONFIG_HOME:-$HOME/.config}"
+}
+
+# store_load <hash> -> prints "id<TAB>idKey" for that database, or nothing.
+store_load() {
+    local f; f="$(store_path)"
+    [[ -f "$f" ]] || return 0
+    jq -r --arg h "$1" '(.[$h] // empty) | select(.id and .idKey) | "\(.id)\t\(.idKey)"' \
+        "$f" 2>/dev/null || true
+}
+
+# store_save <hash> <id> <idKey> -> upsert the entry (atomic write, mode 600).
+store_save() {
+    local hash="$1" id="$2" key="$3" f dir tmp now cur
+    f="$(store_path)"; dir="$(dirname "$f")"
+    mkdir -p "$dir" 2>/dev/null || true
+    chmod 700 "$dir" 2>/dev/null || true
+    now="$(date +%s)"
+    cur='{}'; [[ -s "$f" ]] && cur="$(<"$f")"; [[ -n "$cur" ]] || cur='{}'
+    tmp="$(mktemp "$dir/.assoc.XXXXXX")" || return 0
+    if jq --arg h "$hash" --arg id "$id" --arg key "$key" --argjson now "$now" '
+            .[$h] = {id:$id, idKey:$key,
+                     created: ((.[$h].created) // $now), lastUsed:$now}' \
+            <<<"$cur" >"$tmp" 2>/dev/null; then
+        chmod 600 "$tmp" 2>/dev/null || true; mv "$tmp" "$f"
+    else
+        rm -f "$tmp"
+    fi
+}
+
+# store_touch <hash> -> bump lastUsed (best-effort; failures are ignored).
+store_touch() {
+    local hash="$1" f dir tmp now
+    f="$(store_path)"; [[ -f "$f" ]] || return 0
+    dir="$(dirname "$f")"; now="$(date +%s)"
+    tmp="$(mktemp "$dir/.assoc.XXXXXX")" || return 0
+    if jq --arg h "$hash" --argjson now "$now" \
+            'if has($h) then (.[$h].lastUsed=$now) else . end' "$f" >"$tmp" 2>/dev/null; then
+        chmod 600 "$tmp" 2>/dev/null || true; mv "$tmp" "$f"
+    else
+        rm -f "$tmp"
+    fi
+}
+
 require_tools() {
     need jq || die "$EX_USAGE" "'jq' not found. Install it: apt install jq | dnf install jq | pacman -S jq | apk add jq"
     need "$PY" || die "$EX_USAGE" "'$PY' (python3) not found."
     [[ -f "$CHANNEL" ]] || die "$EX_PROTO" "channel helper missing: $CHANNEL"
 }
 
-require_assoc() {
-    [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]] || die "$EX_NOASSOC" \
-        "Not associated. Set KPXC_ASSOC_ID and KPXC_ASSOC_KEY (run: kpxc-agent associate)."
+# ensure_db_open [unlock] -> prints the open database's hash, or fails (returns 1).
+# Mirrors the browser's first per-connection step (get-databasehash). With
+# unlock=force-unlock (or the global --trigger-unlock) this is what makes KeePassXC
+# reopen and unlock the *last-used database* when it is locked OR not currently
+# loaded, popping its unlock dialog. The channel's existing trigger-unlock wait
+# then blocks until the database-unlocked broadcast and retries. Without this
+# preamble, a request against a closed (no-database) KeePassXC never pops a dialog.
+ensure_db_open() {
+    local unlock="${1-force-unlock}" reply hash
+    reply=$(run_action '{"action":"get-databasehash"}' "$unlock") || return 1
+    hash=$(jq -r '.hash // empty' <<<"$reply")
+    [[ -n "$hash" ]] || return 1
+    printf '%s' "$hash"
+}
+
+# do_associate -> pair with the open database; sets+exports KPXC_ASSOC_ID/KEY, sets
+# ASSOC_HASH/ASSOC_ID/ASSOC_KEY, and persists to the store. Dies on failure, so it
+# must be called directly (never inside a command substitution, which would swallow
+# die()'s exit).
+do_associate() {
+    local idkey inner reply ok id rhash
+    idkey=$("$PY" "$CHANNEL" keypair) || die "$EX_PROTO" "key generation failed"
+    inner=$(jq -nc --arg idkey "$idkey" '{action:"associate", key:"@CLIENTKEY@", idKey:$idkey}')
+    reply=$(run_action "$inner" force-unlock) \
+        || die "$EX_UNREACH" "KeePassXC unreachable (running? Browser Integration enabled?)"
+    ok=$(jq -r '.success // empty' <<<"$reply")
+    id=$(jq -r '.id // empty' <<<"$reply")
+    rhash=$(jq -r '.hash // empty' <<<"$reply")
+    [[ "$ok" == "true" && -n "$id" ]] \
+        || die "$EX_DENIED" "association failed or declined in KeePassXC: $(jq -c . <<<"$reply")"
+    store_save "$rhash" "$id" "$idkey"
+    ASSOC_HASH="$rhash"; ASSOC_ID="$id"; ASSOC_KEY="$idkey"
+    KPXC_ASSOC_ID="$id"; KPXC_ASSOC_KEY="$idkey"; export KPXC_ASSOC_ID KPXC_ASSOC_KEY
+}
+
+# resolve_assoc [unlock] -> guarantee an open database and a usable association in
+# KPXC_ASSOC_ID/KEY, mirroring the extension's reconnect(): open/unlock the DB, then
+# prefer an env override (CI), else the stored association for this DB, else pair
+# once and persist. Credential commands call this instead of require_assoc, so a
+# saved pairing is reused silently and re-association is never needed.
+resolve_assoc() {
+    local unlock="${1-force-unlock}" hash row
+    hash=$(ensure_db_open "$unlock") \
+        || die "$EX_UNREACH" "KeePassXC has no open database (unlock it, or pass --trigger-unlock)."
+    [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]] && return 0
+    row=$(store_load "$hash")
+    if [[ -n "$row" ]]; then
+        KPXC_ASSOC_ID=${row%%$'\t'*}; KPXC_ASSOC_KEY=${row#*$'\t'}
+        export KPXC_ASSOC_ID KPXC_ASSOC_KEY
+        store_touch "$hash" || true
+        return 0
+    fi
+    do_associate
 }
 
 # Locate a keepassxc-proxy binary; echoes a single-quoted exec string (or fails).
@@ -123,7 +224,7 @@ run_action() {
 # run_assoc_action <inner-json> [force-unlock]  ->  prints the action reply JSON.
 # KeePassXC validates association per-connection, so credential/database actions
 # must be preceded by test-associate on the SAME connection (as the extension does).
-# Callers must have already run require_assoc. On a failed test-associate this emits
+# Callers must have already run resolve_assoc. On a failed test-associate this emits
 # a synthetic errorCode-10 envelope so the caller's check_reply maps it to EX_NOASSOC
 # (dying here would be swallowed by command substitution).
 run_assoc_action() {
@@ -208,27 +309,28 @@ EOF
 
 cmd_associate() {
     require_tools
-    local idkey reply ok id hash
-    idkey=$("$PY" "$CHANNEL" keypair) || die "$EX_PROTO" "key generation failed"
-    local inner
-    inner=$(jq -nc --arg idkey "$idkey" '{action:"associate", key:"@CLIENTKEY@", idKey:$idkey}')
-    # associate always triggers unlock, mirroring the browser extension.
-    reply=$(run_action "$inner" force-unlock) || die "$EX_UNREACH" \
-        "KeePassXC unreachable (running? Browser Integration enabled?)"
-    ok=$(jq -r '.success // empty' <<<"$reply")
-    id=$(jq -r '.id // empty' <<<"$reply")
-    hash=$(jq -r '.hash // empty' <<<"$reply")
-    if [[ "$ok" != "true" || -z "$id" ]]; then
-        die "$EX_DENIED" "association failed or declined in KeePassXC: $(jq -c . <<<"$reply")"
-    fi
-    printf '# keepassxc-cli-agent associated with database %s\n' "$hash"
-    printf 'export KPXC_ASSOC_ID=%s\n' "$(shq "$id")"
-    printf 'export KPXC_ASSOC_KEY=%s\n' "$(shq "$idkey")"
+    # Open/unlock the database first (mirrors the browser): this pops the unlock
+    # dialog even from a cold tray with no database loaded, so associate then runs
+    # against an open database.
+    ensure_db_open force-unlock >/dev/null \
+        || die "$EX_UNREACH" "KeePassXC has no open database to associate with (unlock it, or pass --trigger-unlock)."
+    do_associate  # sets ASSOC_* and persists to the store; dies on failure
+    printf '# keepassxc-cli-agent associated with database %s (saved to %s)\n' "$ASSOC_HASH" "$(store_path)"
+    printf 'export KPXC_ASSOC_ID=%s\n' "$(shq "$ASSOC_ID")"
+    printf 'export KPXC_ASSOC_KEY=%s\n' "$(shq "$ASSOC_KEY")"
 }
 
 cmd_test() {
-    require_tools; require_assoc
-    local inner reply
+    require_tools
+    local hash row inner reply unlock=""
+    [[ "$TRIGGER" == 1 ]] && unlock=force-unlock
+    hash=$(ensure_db_open "$unlock") \
+        || die "$EX_UNREACH" "KeePassXC has no open database (unlock it, or pass --trigger-unlock)."
+    if [[ -z "${KPXC_ASSOC_ID:-}" || -z "${KPXC_ASSOC_KEY:-}" ]]; then
+        row=$(store_load "$hash")
+        [[ -n "$row" ]] || die "$EX_NOASSOC" "no association stored for this database (run: kpxc-agent associate)."
+        KPXC_ASSOC_ID=${row%%$'\t'*}; KPXC_ASSOC_KEY=${row#*$'\t'}
+    fi
     inner=$(jq -nc --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" \
         '{action:"test-associate", id:$id, key:$key}')
     reply=$(run_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
@@ -266,7 +368,7 @@ cmd_get_logins() {
         ""|username|password|name|uuid|totp) ;;
         *) die "$EX_USAGE" "get-logins: unknown --field '$field' (use username|password|name|uuid|totp)";;
     esac
-    require_tools; require_assoc
+    require_tools; resolve_assoc
     local inner reply
     inner=$(jq -nc --arg url "$url" --arg sub "$submit" --arg ha "$httpauth" \
         --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" '
@@ -304,7 +406,7 @@ cmd_get_logins() {
 
 cmd_get_totp() {
     local uuid="${1:-}"; [[ -n "$uuid" ]] || die "$EX_USAGE" "get-totp: UUID required"
-    require_tools; require_assoc
+    require_tools; resolve_assoc
     local inner reply
     inner=$(jq -nc --arg u "$uuid" '{action:"get-totp", uuid:$u}')
     reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
@@ -313,7 +415,7 @@ cmd_get_totp() {
 }
 
 cmd_generate_password() {
-    require_tools; require_assoc
+    require_tools; resolve_assoc
     local inner reply pw
     inner=$(jq -nc --arg rid "$(printf '%08x' $((RANDOM*RANDOM)))" \
         '{action:"generate-password", requestID:$rid}')
@@ -340,7 +442,7 @@ cmd_set_login() {
     done
     [[ -n "$url" && -n "$user" ]] || die "$EX_USAGE" "set-login: URL and --username required"
     url=$(normalize_url "$url")
-    require_tools; require_assoc
+    require_tools; resolve_assoc
     local inner reply
     inner=$(jq -nc --arg url "$url" --arg sub "${submit:-$url}" --arg id "$KPXC_ASSOC_ID" \
         --arg login "$user" --arg pw "$pass" --arg group "$group" --arg guuid "$guuid" --arg uuid "$uuid" '
@@ -356,7 +458,7 @@ cmd_set_login() {
 cmd_groups() {
     local want_json=0
     [[ "${1:-}" == "--json" ]] && want_json=1
-    require_tools; require_assoc
+    require_tools; resolve_assoc
     local reply; reply=$(run_assoc_action '{"action":"get-database-groups"}') || die "$EX_UNREACH" "KeePassXC unreachable."
     check_reply "$reply"
     # KeePassXC nests the root groups under .groups.groups (older docs show .groups).
@@ -372,7 +474,7 @@ cmd_groups() {
 
 cmd_create_group() {
     local name="${1:-}"; [[ -n "$name" ]] || die "$EX_USAGE" "create-group: NAME required"
-    require_tools; require_assoc
+    require_tools; resolve_assoc
     local inner reply
     inner=$(jq -nc --arg n "$name" '{action:"create-new-group", groupName:$n}')
     reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
@@ -447,8 +549,14 @@ cmd_doctor() {
             printf '  [warn] KeePassXC socket not found (start KeePassXC and enable Browser Integration)\n'; fi
     fi
     [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]] \
-        && printf '  [ok]   association vars present (KPXC_ASSOC_ID/KEY)\n' \
-        || printf '  [info] no KPXC_ASSOC_ID/KEY in env (run: kpxc-agent associate)\n'
+        && printf '  [ok]   association vars present (KPXC_ASSOC_ID/KEY override the store)\n' \
+        || printf '  [info] no KPXC_ASSOC_ID/KEY in env (using the persisted store, if any)\n'
+    if [[ -f "$(store_path)" ]] && need jq; then
+        printf '  [ok]   association store: %s (%s saved)\n' \
+            "$(store_path)" "$(jq 'length' "$(store_path)" 2>/dev/null || printf '?')"
+    else
+        printf '  [info] no association store yet (created on first associate: %s)\n' "$(store_path)"
+    fi
     return $ok
 }
 
