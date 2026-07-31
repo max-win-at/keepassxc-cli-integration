@@ -42,7 +42,32 @@ def inc(n):
 
 
 HOST_PK, HOST_SK = keypair()
-DBHASH = "abc123deadbeef"
+# A list so a background thread can swap the "active database" mid-run; see below.
+DBHASH = ["abc123deadbeef"]
+ALTHASH = "fee1deadbeef99"
+# KPXC_MOCK_HASH_SWITCH_AFTER=<seconds> flips the active database hash once, standing
+# in for the user switching to a different vault in the KeePassXC GUI. Exercises
+# `wait-db --changed`, which cannot rely on the database-unlocked broadcast because
+# switching between two already-unlocked databases emits no signal.
+_switch_after = os.environ.get("KPXC_MOCK_HASH_SWITCH_AFTER")
+if _switch_after:
+    def _switch():
+        time.sleep(float(_switch_after))
+        DBHASH[0] = ALTHASH
+    threading.Thread(target=_switch, daemon=True).start()
+
+# get-logins is URL-aware so the miss and multi-match paths are reachable:
+#   https://box.example   -> one entry
+#   https://multi.example -> two entries (choosing among matches)
+#   anything else         -> errorCode 15, which the real KeePassXC returns for "no
+#                            logins found" and which must surface as exit 6, not exit 0.
+ENTRIES = {
+    "https://box.example": [
+        {"login": "admin", "name": "Box", "password": "p'q\"x y", "uuid": "u1"}],
+    "https://multi.example": [
+        {"login": "admin", "name": "Box prod", "password": "first-secret", "uuid": "u1"},
+        {"login": "deploy", "name": "Box staging", "password": "second-secret", "uuid": "u2"}],
+}
 # When KPXC_MOCK_LOCKED is set, start with no database "open": the first
 # get-databasehash returns errorCode 1 (as a locked/closed KeePassXC does), then a
 # database-unlocked broadcast is sent shortly after so the agent's triggerUnlock
@@ -93,10 +118,10 @@ def handle(conn):
         rn = b64d(req["nonce"])
         inner = json.loads(box_open(b64d(req["message"]), rn, client_pk[0], HOST_SK))
         if action == "associate":
-            reply_encrypted(action, {"hash": DBHASH, "version": "2.7.0", "success": "true", "id": "mock"}, rn)
+            reply_encrypted(action, {"hash": DBHASH[0], "version": "2.7.0", "success": "true", "id": "mock"}, rn)
         elif action == "test-associate":
             associated[0] = True
-            reply_encrypted(action, {"version": "2.7.0", "hash": DBHASH, "id": "mock", "success": "true"}, rn)
+            reply_encrypted(action, {"version": "2.7.0", "hash": DBHASH[0], "id": "mock", "success": "true"}, rn)
         elif action == "get-databasehash":
             if LOCKED[0]:
                 # Refuse while locked, then unlock shortly so the agent's
@@ -112,21 +137,24 @@ def handle(conn):
                         pass
                 threading.Thread(target=_unlock, daemon=True).start()
             else:
-                reply_encrypted(action, {"action": "hash", "hash": DBHASH, "version": "2.7.0"}, rn)
+                reply_encrypted(action, {"action": "hash", "hash": DBHASH[0], "version": "2.7.0"}, rn)
         elif action == "get-logins":
             if not associated[0]:
                 send({"action": action, "error": "association failed", "errorCode": "8"})
             else:
-                reply_encrypted(action, {"count": "1", "entries": [
-                    {"login": "admin", "name": "Box", "password": "p'q\"x y", "uuid": "u1"}],
-                    "success": "true", "hash": DBHASH}, rn)
+                found = ENTRIES.get(inner.get("url", ""))
+                if not found:
+                    send({"action": action, "error": "No logins found", "errorCode": "15"})
+                else:
+                    reply_encrypted(action, {"count": str(len(found)), "entries": found,
+                                             "success": "true", "hash": DBHASH[0]}, rn)
         elif action == "get-totp":
             reply_encrypted(action, {"totp": "123456", "success": "true", "version": "2.7.0"}, rn)
         elif action == "generate-password":
             send({})  # empty ack frame, as the real KeePassXC does
             reply_encrypted(action, {"password": "Gen3r@ted-Long-Pass", "success": "true", "version": "2.7.0"}, rn)
         elif action == "set-login":
-            reply_encrypted(action, {"error": "", "success": "true", "hash": DBHASH}, rn)
+            reply_encrypted(action, {"error": "", "success": "true", "hash": DBHASH[0]}, rn)
         elif action == "get-database-groups":
             reply_encrypted(action, dict(DBGROUPS, success="true"), rn)
         elif action == "create-new-group":
