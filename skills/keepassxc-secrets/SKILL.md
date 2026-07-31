@@ -43,9 +43,14 @@ becomes part of your context. The whole point of this tool is that secrets stay 
 process memory for one command and vanish. So:
 
 - **A secret reaches you only through `--field`, captured into a shell variable.**
-  Always assign it: `pw=$(kpxc-agent get-logins URL --field password)`. Never run a
-  secret-producing command bare — `kpxc-agent get-logins URL --field password` on its
-  own line puts the password in the transcript, on disk, and in any log of this session.
+  Never run a secret-producing command bare — `kpxc-agent get-logins URL --field
+  password` on its own line puts the password in the transcript, on disk, and in any
+  log of this session. Always assign it instead:
+
+  ```bash
+  pw=$(kpxc-agent get-logins URL --field password)
+  ```
+
 - **`--json` is metadata only.** It returns `uuid`, `name`, `login`, `group` — it
   cannot return a password or TOTP by design. Use it to *choose* among matches, then
   fetch the chosen one:
@@ -96,10 +101,15 @@ a human to click "Allow" in a KeePassXC dialog — you cannot complete it unatte
 eval "$(kpxc-agent --trigger-unlock associate)"
 ```
 
-`kpxc-agent` saves the pairing itself, per database, in
-`~/.config/keepassxc-cli-agent/associations.json`, and reloads it automatically on later
-runs — so **you normally never need to think about association at all**. The two
-non-secret `export` lines it prints are an override, useful for CI or for passing
+`kpxc-agent` saves the pairing itself, per database, in a local config file, and
+reloads it automatically on later runs — so **you normally never need to think about
+association at all**:
+
+```
+~/.config/keepassxc-cli-agent/associations.json
+```
+
+The two non-secret `export` lines it prints are an override, useful for CI or for passing
 identity over SSH (see `references/remote-ssh.md`); they are not a prerequisite. Verify
 an existing pairing with `kpxc-agent test`.
 
