@@ -106,7 +106,7 @@ reloads it automatically on later runs — so **you normally never need to think
 association at all**:
 
 ```
-~/.config/keepassxc-cli-agent/associations.json
+$HOME/.config/keepassxc-cli-agent/associations.json
 ```
 
 The two non-secret `export` lines it prints are an override, useful for CI or for passing
