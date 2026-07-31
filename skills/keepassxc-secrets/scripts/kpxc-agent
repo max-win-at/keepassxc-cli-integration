@@ -36,6 +36,8 @@ EX_UNREACH=2     # KeePassXC not reachable / database not opened
 EX_DENIED=3      # request refused, cancelled, or locked
 EX_NOASSOC=4     # no / invalid association
 EX_PROTO=5       # protocol or crypto failure
+EX_NOTFOUND=6    # reachable, unlocked and associated, but nothing matched
+EX_TIMEOUT=7     # timed out waiting for a database
 
 # Global options (may appear before the subcommand)
 SOCKET="${KPXC_SOCKET:-}"       # direct unix-socket path
@@ -53,6 +55,28 @@ shq() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
 
 # Ensure URL has a scheme; default to https:// for bare hostnames.
 normalize_url() { case "$1" in *://*) printf '%s' "$1";; *) printf 'https://%s' "$1";; esac; }
+
+# Hash of the database the current command is talking to; set by resolve_assoc so
+# error messages can name the vault ("no entry matches X in database Y"). Must be
+# assigned outside a command substitution or the value is lost with the subshell.
+ACTIVE_DB_HASH=""
+
+# Non-secret projection of an entries array. An explicit ALLOWLIST, not a blocklist:
+# `password`, `totp`, `stringFields` and any field KeePassXC adds in a later version
+# can never reach stdout through --json/probe. Secrets leave this tool only through
+# --field, which the caller is expected to capture into a shell variable.
+ENTRY_META='[.[] | {uuid, name, login, group, expired} | with_entries(select(.value != null))]'
+
+# Print a plaintext message to stderr for --debug with secret-bearing fields masked.
+# SKILL.md tells agents to retry with --debug, so this must never echo a password.
+dbg_send() {
+    [[ "$DEBUG" == 1 ]] || return 0
+    local m
+    for m in "$@"; do
+        printf 'kpxc-agent: send %s\n' \
+            "$(jq -c 'if has("password") then .password="***" else . end' <<<"$m" 2>/dev/null || printf '%s' "$m")" >&2
+    done
+}
 
 # ---- association store ------------------------------------------------------
 # Persist associations like the browser keyRing: a JSON map keyed by database
@@ -155,6 +179,7 @@ resolve_assoc() {
     local unlock="${1-force-unlock}" hash row
     hash=$(ensure_db_open "$unlock") \
         || die "$EX_UNREACH" "KeePassXC has no open database (unlock it, or pass --trigger-unlock)."
+    ACTIVE_DB_HASH="$hash"
     [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]] && return 0
     row=$(store_load "$hash")
     if [[ -n "$row" ]]; then
@@ -180,6 +205,20 @@ detect_proxy() {
     return 1
 }
 
+# Candidate directories for the KeePassXC browser socket, in the same order as
+# lib/kpxc_channel.py's resolve_socket -- including the Flatpak sandbox path, whose
+# absence here made `doctor` report "socket not found" on Flatpak while every other
+# command worked, which is exactly the false negative that pushes an agent into a
+# fallback instead of using the vault.
+socket_dirs() {
+    local b
+    for b in "${XDG_RUNTIME_DIR:-}" "${TMPDIR:-}" /tmp; do
+        [[ -n "$b" ]] && printf '%s\n' "$b"
+    done
+    [[ -n "${XDG_RUNTIME_DIR:-}" ]] && printf '%s/app/org.keepassxc.KeePassXC\n' "$XDG_RUNTIME_DIR"
+    return 0
+}
+
 # Decide the transport when not given explicitly.
 resolve_transport() {
     [[ -n "$EXEC" || -n "$SOCKET" ]] && return 0
@@ -188,9 +227,9 @@ resolve_transport() {
         return 0
     fi
     local b
-    for b in "${XDG_RUNTIME_DIR:-}" "${TMPDIR:-}" /tmp; do
-        [[ -n "$b" && -S "$b/$SOCK_NAME" ]] && { SOCKET="$b/$SOCK_NAME"; return 0; }
-    done
+    while IFS= read -r b; do
+        [[ -S "$b/$SOCK_NAME" ]] && { SOCKET="$b/$SOCK_NAME"; return 0; }
+    done < <(socket_dirs)
     # No local socket (e.g. KeePassXC runs on Windows): fall back to a proxy relay.
     EXEC="$(detect_proxy)" || true
 }
@@ -217,7 +256,7 @@ channel_pipe() {
 # For actions that need no association context (associate, lock, hash).
 run_action() {
     local inner="$1" unlock="${2:-}"
-    [[ "$DEBUG" == 1 ]] && printf 'kpxc-agent: send %s\n' "$inner" >&2
+    dbg_send "$inner"
     printf '%s\n' "$inner" | channel_pipe "$unlock"
 }
 
@@ -232,7 +271,7 @@ run_assoc_action() {
     local ta out
     ta=$(jq -nc --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" \
         '{action:"test-associate", id:$id, key:$key}')
-    [[ "$DEBUG" == 1 ]] && printf 'kpxc-agent: send %s ; %s\n' "$ta" "$inner" >&2
+    dbg_send "$ta" "$inner"
     out=$(printf '%s\n%s\n' "$ta" "$inner" | channel_pipe "$unlock") || return 1
     if [[ "$(sed -n 1p <<<"$out" | jq -r '.success // empty')" == "true" ]]; then
         sed -n 2p <<<"$out"
@@ -282,7 +321,16 @@ Commands:
   associate                       One-time pairing; prints KPXC_ASSOC_ID / KPXC_ASSOC_KEY exports
   test                            Verify the current association against the open database
   get-logins URL [opts]           Fetch credentials matching URL
-      --submit-url URL  --http-auth  --field username|password|name|uuid|totp  --json
+      --submit-url URL  --http-auth  --field username|password|name|uuid|totp
+      --json            List matches as metadata only (never a password)
+      --entry-uuid U    Pick one match by uuid (from a --json listing)
+      --index N         Pick the Nth match (0-based)
+      --allow-empty     Exit 0 instead of 6 when nothing matches
+  probe URL [URL...]              Which URLs match, and what the entries are called
+      --json                      (metadata only; the diagnostic for a wrong URL field)
+  db-info [--json]                Which database is open (hash, name, pairing state)
+  wait-db --changed|--hash H      Block until the right database is open
+      [--timeout N] [--interval N]  (defaults: 300s timeout, 2s interval)
   get-totp UUID                   Fetch the current TOTP for an entry
   generate-password               Generate a password using KeePassXC's settings
   set-login URL --username U --password P [--submit-url U] [--group G]
@@ -295,13 +343,18 @@ Commands:
                                   (run on the CLIENT; default ADDR 127.0.0.1:19455)
   doctor                          Check prerequisites and socket availability
 
-Identity is taken from the environment:
-  KPXC_ASSOC_ID, KPXC_ASSOC_KEY   Produced by `associate`; not secret (public key + id)
+Pairing is persisted per database in ~/.config/keepassxc-cli-agent/associations.json and
+reused automatically. These env vars override it (useful in CI); neither is secret:
+  KPXC_ASSOC_ID, KPXC_ASSOC_KEY   Produced by `associate` (public key + connection id)
+
+Exit codes:
+  0 success   2 unreachable/not opened   3 refused or cancelled   4 no/bad association
+  5 protocol or crypto failure   6 no matching entry   7 timed out   64 bad usage
 
 Example:
-  kpxc-agent --trigger-unlock associate            # then export the two vars it prints
+  kpxc-agent --trigger-unlock associate            # one-time; needs a click in KeePassXC
   eval "$(kpxc-agent get-logins https://host)"     # sets KPXC_USERNAME / KPXC_PASSWORD
-  pw=$(kpxc-agent get-logins https://host --field password)
+  pw=$(kpxc-agent get-logins https://host --field password)   # capture; never print
 EOF
 }
 
@@ -350,14 +403,44 @@ emit_entry() { # <suffix> <entry-json>
     printf 'KPXC_UUID%s=%s\n'     "$sfx" "$(shq "$(jq -r '.uuid // ""'     <<<"$e")")"
 }
 
+# fetch_logins <url> [submit-url] [http-auth] -> prints the reply JSON.
+# errorCode 15 ("no logins found") is normalized into an empty entries list so callers
+# handle "no match" in one place; every other error is left for the caller's check_reply.
+fetch_logins() {
+    local url="$1" submit="${2:-}" httpauth="${3:-}" inner reply
+    inner=$(jq -nc --arg url "$url" --arg sub "$submit" --arg ha "$httpauth" \
+        --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" '
+        {action:"get-logins", id:$id, url:$url, keys:[{id:$id, key:$key}]}
+        | (if $sub != "" then .submitUrl=$sub else . end)
+        | (if $ha  != "" then .httpAuth=$ha  else . end)')
+    reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
+    if [[ "$(jq -r '.errorCode // empty' <<<"$reply")" == "15" ]]; then
+        printf '%s' '{"success":"true","entries":[]}'
+        return 0
+    fi
+    printf '%s' "$reply"
+}
+
+# A miss is a hard, named failure - never a silent empty result. An agent that gets
+# exit 0 and an empty string cannot tell "no such entry" from "empty password", and
+# falls back to inventing a secret. Name the vault that was searched and point at the
+# two commands that distinguish the two possible causes.
+die_no_match() {
+    die "$EX_NOTFOUND" "no entry matches $1 in the open database (db ${ACTIVE_DB_HASH:0:12}). Either the wrong vault is open, or the entry's URL field differs. Diagnose with: kpxc-agent db-info | kpxc-agent probe $1 <url-variants>"
+}
+
 cmd_get_logins() {
     local url="" submit="" httpauth="" field="" want_json=0
+    local sel_uuid="" sel_index="" allow_empty=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --submit-url) submit="${2:?}"; shift 2;;
             --http-auth)  httpauth="true"; shift;;
             --field)      field="${2:?}"; shift 2;;
             --json)       want_json=1; shift;;
+            --entry-uuid) sel_uuid="${2:?}"; shift 2;;
+            --index)      sel_index="${2:?}"; shift 2;;
+            --allow-empty) allow_empty=1; shift;;
             -*)           die "$EX_USAGE" "get-logins: unknown option $1";;
             *)            url="$1"; shift;;
         esac
@@ -368,40 +451,88 @@ cmd_get_logins() {
         ""|username|password|name|uuid|totp) ;;
         *) die "$EX_USAGE" "get-logins: unknown --field '$field' (use username|password|name|uuid|totp)";;
     esac
+    [[ -z "$sel_uuid" || -z "$sel_index" ]] \
+        || die "$EX_USAGE" "get-logins: --entry-uuid and --index are mutually exclusive"
+    [[ -z "$sel_index" || "$sel_index" =~ ^[0-9]+$ ]] \
+        || die "$EX_USAGE" "get-logins: --index must be a non-negative integer"
     require_tools; resolve_assoc
-    local inner reply
-    inner=$(jq -nc --arg url "$url" --arg sub "$submit" --arg ha "$httpauth" \
-        --arg id "$KPXC_ASSOC_ID" --arg key "$KPXC_ASSOC_KEY" '
-        {action:"get-logins", id:$id, url:$url, keys:[{id:$id, key:$key}]}
-        | (if $sub != "" then .submitUrl=$sub else . end)
-        | (if $ha  != "" then .httpAuth=$ha  else . end)')
-    reply=$(run_assoc_action "$inner") || die "$EX_UNREACH" "KeePassXC unreachable."
-    # errorCode 15 = no logins found: treat as a clean empty result.
-    if [[ "$(jq -r '.errorCode // empty' <<<"$reply")" == "15" ]]; then
-        [[ "$want_json" == 1 ]] && echo "[]"
-        return 0
-    fi
+    local reply entries count
+    reply=$(fetch_logins "$url" "$submit" "$httpauth")
     check_reply "$reply"
+    entries=$(jq -c '.entries // []' <<<"$reply")
+    count=$(jq 'length' <<<"$entries")
 
-    if [[ "$want_json" == 1 ]]; then jq -c '.entries // []' <<<"$reply"; return 0; fi
+    if [[ "$count" == 0 && "$allow_empty" != 1 ]]; then
+        [[ "$want_json" == 1 ]] && echo "[]"
+        die_no_match "$url"
+    fi
+
+    # Narrow to one entry when the caller picked it from a previous --json listing.
+    if [[ -n "$sel_uuid" ]]; then
+        entries=$(jq -c --arg u "$sel_uuid" '[.[] | select(.uuid == $u)]' <<<"$entries")
+        [[ "$(jq 'length' <<<"$entries")" != 0 ]] \
+            || die "$EX_NOTFOUND" "no entry with uuid '$sel_uuid' among the $count match(es) for $url"
+    elif [[ -n "$sel_index" ]]; then
+        [[ "$sel_index" -lt "$count" ]] \
+            || die "$EX_USAGE" "--index $sel_index out of range ($count match(es) for $url)"
+        entries=$(jq -c --argjson i "$sel_index" '[.[$i]]' <<<"$entries")
+    fi
+
+    # --json is metadata only (see ENTRY_META): it exists to choose among matches, and
+    # can never carry a password. Fetch the chosen one with --field --entry-uuid.
+    if [[ "$want_json" == 1 ]]; then jq -c "$ENTRY_META" <<<"$entries"; return 0; fi
     if [[ -n "$field" ]]; then
         local sel
         case "$field" in
             username) sel='.login';;  password) sel='.password';;
             name)     sel='.name';;   uuid)     sel='.uuid';;  totp) sel='.totp';;
-            *)        die "$EX_USAGE" "get-logins: unknown --field $field";;
         esac
-        jq -r ".entries[0] | (${sel} // \"\")" <<<"$reply"
+        jq -r ".[0] | (${sel} // \"\")" <<<"$entries"
         return 0
     fi
-    local count; count=$(jq -r '.entries | length' <<<"$reply")
+    count=$(jq 'length' <<<"$entries")
     case "$count" in
         0) return 0;;
-        1) emit_entry "" "$(jq -c '.entries[0]' <<<"$reply")";;
+        1) emit_entry "" "$(jq -c '.[0]' <<<"$entries")";;
         *) printf 'KPXC_COUNT=%s\n' "$count"
            local i=0
-           while [[ $i -lt $count ]]; do emit_entry "_$i" "$(jq -c ".entries[$i]" <<<"$reply")"; i=$((i+1)); done;;
+           while [[ $i -lt $count ]]; do emit_entry "_$i" "$(jq -c ".[$i]" <<<"$entries")"; i=$((i+1)); done;;
     esac
+}
+
+# probe: which of these URLs actually match something, and what are they called?
+# The diagnostic for "the entry's URL field is a typo / an unexpected format". Prints
+# entry names and usernames (via ENTRY_META) so the answer can be shown to the user -
+# it is the only command in the credential path whose output is safe to display.
+cmd_probe() {
+    local want_json=0 urls=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) want_json=1; shift;;
+            -*)     die "$EX_USAGE" "probe: unknown option $1";;
+            *)      urls+=("$(normalize_url "$1")"); shift;;
+        esac
+    done
+    [[ ${#urls[@]} -gt 0 ]] || die "$EX_USAGE" "probe: at least one URL required"
+    require_tools; resolve_assoc
+    local u reply meta n total=0 out='[]'
+    for u in "${urls[@]}"; do
+        reply=$(fetch_logins "$u")
+        check_reply "$reply"
+        meta=$(jq -c "$ENTRY_META" <<<"$(jq -c '.entries // []' <<<"$reply")")
+        n=$(jq 'length' <<<"$meta")
+        total=$((total + n))
+        if [[ "$want_json" == 1 ]]; then
+            out=$(jq -c --arg u "$u" --argjson e "$meta" '. + [{url:$u, count:($e|length), entries:$e}]' <<<"$out")
+        else
+            printf '%s\t%s\t%s\n' "$u" "$n" \
+                "$(jq -r 'map("\(.name // "?") (\(.login // ""))") | join(", ")' <<<"$meta")"
+        fi
+    done
+    if [[ "$want_json" == 1 ]]; then printf '%s\n' "$out"; fi
+    if [[ "$total" -eq 0 ]]; then
+        die "$EX_NOTFOUND" "none of the probed URLs match an entry in the open database (db ${ACTIVE_DB_HASH:0:12}). Check which vault is open (kpxc-agent db-info), or have the user correct the entry's URL field."
+    fi
 }
 
 cmd_get_totp() {
@@ -521,6 +652,116 @@ cmd_serve_bridge() {
     exec "${args[@]}"
 }
 
+# db-info: which vault am I actually talking to? The browser protocol exposes no
+# database name, so identity is the hash plus the ROOT GROUP name -- KeePassXC names
+# the root group after the database, making it the only human-recognizable label
+# available. Everything printed here is non-secret.
+cmd_db_info() {
+    local want_json=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) want_json=1; shift;;
+            -*)     die "$EX_USAGE" "db-info: unknown option $1";;
+            *)      die "$EX_USAGE" "db-info: unexpected argument '$1'";;
+        esac
+    done
+    require_tools
+    local unlock="" hash state paired root="" row reply
+    # Do not force unlock: a diagnostic must be able to report "locked" rather than
+    # popping a dialog the caller did not ask for. --trigger-unlock still works.
+    [[ "$TRIGGER" == 1 ]] && unlock=force-unlock
+    hash=$(ensure_db_open "$unlock") || hash=""
+    if [[ -z "$hash" ]]; then
+        state="closed-or-locked"; paired="unknown"
+    else
+        state="open"
+        # Reuse a pairing if we already have one, but never pair from a diagnostic:
+        # do_associate would pop an approval dialog as a side effect of asking a question.
+        if [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]]; then
+            paired="yes (KPXC_ASSOC_* env)"
+        else
+            row=$(store_load "$hash")
+            if [[ -n "$row" ]]; then
+                KPXC_ASSOC_ID=${row%%$'\t'*}; KPXC_ASSOC_KEY=${row#*$'\t'}
+                paired="yes (association store)"
+            else
+                paired="no"
+            fi
+        fi
+        if [[ -n "${KPXC_ASSOC_ID:-}" && -n "${KPXC_ASSOC_KEY:-}" ]]; then
+            reply=$(run_assoc_action '{"action":"get-database-groups"}' "") || reply=""
+            [[ -n "$reply" ]] \
+                && root=$(jq -r '((.groups.groups // .groups) // [])[0].name // ""' <<<"$reply" 2>/dev/null || printf '')
+        fi
+    fi
+    if [[ "$want_json" == 1 ]]; then
+        jq -nc --arg s "$state" --arg h "$hash" --arg n "$root" --arg p "$paired" \
+            '{state:$s, hash:$h, name:$n, paired:$p}'
+    else
+        printf 'database: %s\n' "$state"
+        printf 'hash:     %s\n' "${hash:-(none)}"
+        printf 'name:     %s\n' "${root:-(unknown - root group name unavailable)}"
+        printf 'paired:   %s\n' "$paired"
+        [[ -n "$hash" ]] \
+            || printf 'hint:     no database is open; re-run as `kpxc-agent --trigger-unlock db-info` to pop the unlock dialog (credential commands do this automatically)\n'
+    fi
+    [[ -n "$hash" ]] || return "$EX_UNREACH"
+}
+
+# probe_hash -> the active database hash, or nothing when none is open. Never forces
+# unlock: wait-db calls this on every tick and force-unlock would re-pop the unlock
+# dialog each time.
+probe_hash() {
+    local reply
+    reply=$(run_action '{"action":"get-databasehash"}' "" 2>/dev/null) || return 0
+    jq -r '.hash // empty' <<<"$reply" 2>/dev/null || true
+}
+
+# wait-db: block until the user has the right vault open, so a credential lookup can be
+# retried instead of the whole task failing. Polls rather than waiting on the
+# database-unlocked broadcast, because switching between two ALREADY-unlocked databases
+# emits no signal at all - and that switch is the case this exists for.
+cmd_wait_db() {
+    local target="" changed=0 timeout=300 interval=2
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --hash)     target="${2:?}"; shift 2;;
+            --changed)  changed=1; shift;;
+            --timeout)  timeout="${2:?}"; shift 2;;
+            --interval) interval="${2:?}"; shift 2;;
+            -*)         die "$EX_USAGE" "wait-db: unknown option $1";;
+            *)          die "$EX_USAGE" "wait-db: unexpected argument '$1'";;
+        esac
+    done
+    [[ -n "$target" || "$changed" == 1 ]] \
+        || die "$EX_USAGE" "wait-db: pass --hash HASH or --changed"
+    [[ "$timeout" =~ ^[0-9]+$ && "$interval" =~ ^[0-9]+$ && "$interval" -gt 0 ]] \
+        || die "$EX_USAGE" "wait-db: --timeout/--interval must be integers (--interval > 0)"
+    require_tools
+    local baseline hash what deadline=$((SECONDS + timeout)) noted=$SECONDS
+    baseline=$(probe_hash)
+    if [[ -n "$target" ]]; then what="database $target"
+    elif [[ -n "$baseline" ]]; then what="a database other than ${baseline:0:12}"
+    else what="any database to be opened"; fi
+    while :; do
+        hash=$(probe_hash)
+        if [[ -n "$hash" ]]; then
+            if [[ -n "$target" ]]; then
+                [[ "$hash" == "$target" ]] && { printf '%s\n' "$hash"; return 0; }
+            elif [[ -z "$baseline" || "$hash" != "$baseline" ]]; then
+                printf '%s\n' "$hash"; return 0
+            fi
+        fi
+        [[ $SECONDS -lt $deadline ]] || break
+        if [[ $((SECONDS - noted)) -ge 30 ]]; then
+            printf 'kpxc-agent: still waiting for %s (%ss left)\n' "$what" "$((deadline - SECONDS))" >&2
+            noted=$SECONDS
+        fi
+        sleep "$interval"
+    done
+    die "$EX_TIMEOUT" "timed out after ${timeout}s waiting for $what"
+}
+
 cmd_doctor() {
     local ok=0 reply
     printf 'keepassxc-cli-agent doctor\n'
@@ -541,9 +782,9 @@ cmd_doctor() {
     else
         local sp="${SOCKET:-}"
         if [[ -z "$sp" ]]; then
-            for b in "${XDG_RUNTIME_DIR:-}" "${TMPDIR:-}" /tmp; do
-                [[ -n "$b" && -S "$b/org.keepassxc.KeePassXC.BrowserServer" ]] && sp="$b/org.keepassxc.KeePassXC.BrowserServer" && break
-            done
+            while IFS= read -r b; do
+                [[ -S "$b/$SOCK_NAME" ]] && { sp="$b/$SOCK_NAME"; break; }
+            done < <(socket_dirs)
         fi
         if [[ -n "$sp" && -S "$sp" ]]; then printf '  [ok]   socket: %s\n' "$sp"; else
             printf '  [warn] KeePassXC socket not found (start KeePassXC and enable Browser Integration)\n'; fi
@@ -583,6 +824,9 @@ case "$cmd" in
     associate)          cmd_associate "$@";;
     test)               cmd_test "$@";;
     get-logins)         cmd_get_logins "$@";;
+    probe)              cmd_probe "$@";;
+    db-info)            cmd_db_info "$@";;
+    wait-db)            cmd_wait_db "$@";;
     get-totp)           cmd_get_totp "$@";;
     generate-password)  cmd_generate_password "$@";;
     set-login)          cmd_set_login "$@";;

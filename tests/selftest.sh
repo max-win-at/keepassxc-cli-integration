@@ -109,6 +109,97 @@ if command -v jq >/dev/null 2>&1; then
         bad "e2e: store-backed reuse (spw=${spw:-})"
     fi
 
+    # --json is metadata ONLY. It exists to choose among matches; a password must never
+    # reach stdout that way, because an agent that runs it uncaptured logs the secret.
+    j=$("$AGENT" get-logins https://multi.example --json 2>/dev/null) || true
+    if [[ "$(jq 'length' <<<"$j" 2>/dev/null)" == 2 ]] \
+        && ! grep -qE 'password|first-secret|second-secret' <<<"$j" \
+        && jq -e '.[0] | has("uuid") and has("name") and has("login")' >/dev/null 2>&1 <<<"$j"; then
+        ok "e2e: --json lists matches as metadata, with no password/totp"
+    else
+        bad "e2e: --json redaction (j=$j)"
+    fi
+
+    # ...which is only usable if the chosen match can then be fetched by uuid/index.
+    p2=$("$AGENT" get-logins https://multi.example --field password --entry-uuid u2 2>/dev/null) || true
+    p0=$("$AGENT" get-logins https://multi.example --field password --index 0 2>/dev/null) || true
+    if [[ "$p2" == "second-secret" && "$p0" == "first-secret" ]]; then
+        ok "e2e: --entry-uuid / --index select among multiple matches"
+    else
+        bad "e2e: entry selector (uuid=$p2 index=$p0)"
+    fi
+
+    # A miss must be LOUD: exit 6, not exit 0 with an empty string. The silent-empty
+    # result is what made a consuming agent fall back to an invented secret.
+    rc=0; miss=$("$AGENT" get-logins https://nope.example --field password 2>/tmp/kpxc_miss.$$) || rc=$?
+    if [[ "$rc" == 6 && -z "$miss" ]] && grep -q 'nope.example' /tmp/kpxc_miss.$$; then
+        ok "e2e: no match exits 6 and names the URL on stderr"
+    else
+        bad "e2e: no-match exit code (rc=$rc out=[$miss])"
+    fi
+    rm -f /tmp/kpxc_miss.$$
+
+    rc=0; "$AGENT" get-logins https://nope.example --field password --allow-empty >/dev/null 2>&1 || rc=$?
+    [[ "$rc" == 0 ]] && ok "e2e: --allow-empty restores exit 0 for existence checks" \
+        || bad "e2e: --allow-empty (rc=$rc)"
+
+    rc=0; mj=$("$AGENT" get-logins https://nope.example --json 2>/dev/null) || rc=$?
+    [[ "$rc" == 6 && "$mj" == "[]" ]] && ok "e2e: --json miss prints [] and still exits 6" \
+        || bad "e2e: --json miss (rc=$rc mj=$mj)"
+
+    # probe: the diagnostic for a mistyped/ill-formatted URL field. Safe to show a user.
+    if pr=$("$AGENT" probe https://box.example https://nope.example 2>/dev/null) \
+        && grep -q "$(printf 'https://box.example\t1\t')" <<<"$pr" \
+        && grep -q "$(printf 'https://nope.example\t0\t')" <<<"$pr" \
+        && ! grep -q "p'q" <<<"$pr"; then
+        ok "e2e: probe reports per-URL match counts without secrets"
+    else
+        bad "e2e: probe (pr=$pr)"
+    fi
+    rc=0; "$AGENT" probe https://nope.example https://also-nope.example >/dev/null 2>&1 || rc=$?
+    [[ "$rc" == 6 ]] && ok "e2e: probe exits 6 when no URL matches" || bad "e2e: probe all-miss (rc=$rc)"
+
+    # db-info answers "which vault am I talking to?" in terms a user can recognize.
+    if di=$("$AGENT" db-info 2>/dev/null) \
+        && grep -qE '^database: +open' <<<"$di" \
+        && grep -qE '^hash: +abc123deadbeef' <<<"$di" \
+        && grep -qE '^name: +Root' <<<"$di" \
+        && ! grep -q "p'q" <<<"$di"; then
+        ok "e2e: db-info names the open database (hash + root group)"
+    else
+        bad "e2e: db-info (di=$di)"
+    fi
+
+    h=$("$AGENT" hash 2>/dev/null)
+    w=$("$AGENT" wait-db --hash "$h" --timeout 5 --interval 1 2>/dev/null) || true
+    [[ "$w" == "$h" ]] && ok "e2e: wait-db --hash returns at once when already active" \
+        || bad "e2e: wait-db --hash (w=$w h=$h)"
+    rc=0; "$AGENT" wait-db --hash nosuchhash --timeout 2 --interval 1 >/dev/null 2>&1 || rc=$?
+    [[ "$rc" == 7 ]] && ok "e2e: wait-db times out with exit 7" || bad "e2e: wait-db timeout (rc=$rc)"
+
+    # Switching between two already-unlocked databases emits no broadcast, so wait-db
+    # polls. This mock flips its hash 2s in, standing in for the user switching vaults.
+    WSOCK="$(mktemp -u /tmp/kpxc_switch.XXXXXX.sock)"
+    KPXC_MOCK_HASH_SWITCH_AFTER=2 "$PY" "$HERE/mock_kpxc.py" "$WSOCK" 2>/dev/null &
+    WMOCK=$!
+    for _ in $(seq 1 50); do [[ -S "$WSOCK" ]] && break; sleep 0.05; done
+    if nh=$(KPXC_SOCKET="$WSOCK" "$AGENT" wait-db --changed --timeout 15 --interval 1 2>/dev/null) \
+        && [[ "$nh" == "fee1deadbeef99" ]]; then
+        ok "e2e: wait-db --changed unblocks when the active database changes"
+    else
+        bad "e2e: wait-db --changed (nh=${nh:-})"
+    fi
+    kill "$WMOCK" 2>/dev/null; wait "$WMOCK" 2>/dev/null || true; rm -f "$WSOCK"
+
+    # SKILL.md tells agents to retry with --debug, so --debug must not echo secrets.
+    derr=$(KPXC_AGENT_DEBUG=1 "$AGENT" set-login https://box.example --username u \
+        --password 'SENTINEL-do-not-log' 2>&1 >/dev/null) || true
+    if ! grep -q 'SENTINEL-do-not-log' <<<"$derr"; then
+        ok "e2e: --debug masks the password in the plaintext it prints"
+    else
+        bad "e2e: --debug leaked the password to stderr"
+    fi
+
     # Locked/closed database: get-databasehash(triggerUnlock) preamble must wait for
     # the unlock broadcast and then proceed (the Problem-1 fix). A second mock starts
     # "locked" and unlocks itself ~0.3s after the first hash request.

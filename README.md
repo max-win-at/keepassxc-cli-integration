@@ -19,6 +19,12 @@ tool is that feature for the terminal.
 - 💾 **Store credentials**: Save new or updated credentials directly to the vault.
 - 🔄 **TOTP support**: Fetch time-based one-time passwords for entries with TOTP enabled.
 - 📁 **Group management**: List, create, and organize groups within the KeePassXC database.
+- 🚫 **Secrets stay out of logs**: `--json` and `probe` return metadata only — a password
+  can leave the tool solely through `--field`, which the caller captures into a variable.
+- 🎯 **No silent misses**: a lookup that matches nothing exits `6` naming the vault it
+  searched, so an automated caller cannot mistake "not found" for "no credential".
+- 🧭 **Wrong-vault recovery**: `db-info` identifies the active database and `wait-db`
+  blocks until the user opens the right one, so a task can retry instead of aborting.
 - 🌐 **Cross-platform**: Works on Linux, macOS, and Windows (via WSL or native).
 - 🔄 **Remote SSH integration**: Access KeePassXC from a remote machine using reverse SSH forwarding.
 - 🛠️ **Agent skill**: Bundled skill for AI harnesses (e.g., Claude Code, Copilot CLI) to fetch secrets programmatically.
@@ -78,8 +84,26 @@ Run `./kpxc-agent doctor` to check all of these and the transport to KeePassXC.
 eval "$(./kpxc-agent get-logins https://host.example)"
 echo "$KPXC_USERNAME / $KPXC_PASSWORD"
 
-# ...or grab a single field:
+# ...or grab a single field. Always capture it — never run this bare, or the password
+# ends up in your terminal scrollback and in any agent's transcript:
 pw=$(./kpxc-agent get-logins https://host.example --field password)
+
+# 3. When a lookup finds nothing it exits 6 (not 0-with-empty-output). Two causes,
+#    two diagnostics:
+./kpxc-agent db-info                                   # which vault is actually open?
+./kpxc-agent probe https://host.example https://example.com   # which URL variants match?
+./kpxc-agent wait-db --changed                         # block while the user switches vaults
+```
+
+### Choosing among several matches
+
+`--json` is metadata only — `uuid`, `name`, `login`, `group` — and cannot carry a
+password. List first, then fetch the one you picked:
+
+```bash
+./kpxc-agent get-logins https://host.example --json
+# [{"uuid":"a1b2…","name":"Box prod","login":"admin"},{"uuid":"c3d4…","name":"Box staging",…}]
+pw=$(./kpxc-agent get-logins https://host.example --field password --entry-uuid a1b2…)
 ```
 
 ## Identity & deployment topologies
@@ -183,5 +207,33 @@ bash tests/selftest.sh
 Runs fully offline: the libsodium binding, a `crypto_box` round-trip, nonce-increment
 vectors, `doctor`, and a full **end-to-end flow against a mock KeePassXC**
 (`tests/mock_kpxc.py`) that reproduces the real framing, the per-connection
-`test-associate` requirement, and the `generate-password` ack frame. No running
-KeePassXC is needed. For a live check, see *Quick start*.
+`test-associate` requirement, and the `generate-password` ack frame. It also covers the
+secret-hygiene guarantees — `--json` carrying no password, `--debug` masking one, a miss
+exiting 6, and `wait-db` unblocking on a database switch. No running KeePassXC is
+needed. For a live check, see *Quick start*.
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | success |
+| 2 | KeePassXC unreachable / database not opened |
+| 3 | request refused, cancelled, or locked |
+| 4 | no / invalid association for the open database |
+| 5 | protocol or crypto failure |
+| 6 | no entry matched — reachable, unlocked and paired, but nothing found |
+| 7 | `wait-db` timed out |
+| 64 | bad command-line usage |
+
+### Behavior changes
+
+Two deliberate breaks with earlier versions, both closing a hole that let an automated
+caller proceed with the wrong secret:
+
+- **`get-logins --json` no longer contains passwords or TOTPs.** It returns an allowlisted
+  metadata projection (`uuid`, `name`, `login`, `group`, `expired`) so listing matches
+  cannot leak a secret into a log or an agent's context. Fetch the chosen entry with
+  `--field password --entry-uuid <uuid>`.
+- **A lookup that matches nothing now exits 6** instead of exiting 0 with empty output,
+  and the message names the database it searched. Pass `--allow-empty` to restore the
+  old behavior for genuine existence checks.
