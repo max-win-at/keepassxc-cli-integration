@@ -39,6 +39,7 @@ PK_BYTES = 32     # crypto_box public key
 SK_BYTES = 32     # crypto_box secret key
 NONCE_BYTES = 24  # crypto_box nonce
 MAC_BYTES = 16    # crypto_box_easy authentication tag
+BUF_SIZE = 65536   # raw-socket recv chunk size
 
 
 def die(msg):
@@ -118,6 +119,40 @@ def increment_nonce(nonce):
     return bytes(out)
 
 
+class RawJSONStream:
+    """Incremental reader for KeePassXC's bare-JSON transport (no length prefix,
+    no delimiter): feed() raw chunks; pop() returns (object, segment) for the
+    first complete JSON message in the buffer, or None while incomplete.
+
+    Messages may coalesce in the socket buffer (a reply and the next broadcast
+    can arrive in one recv()), so a reader must buffer and parse incrementally
+    instead of assuming one recv() per message. `segment` is the exact byte
+    slice consumed, so a relay can forward it verbatim without re-serializing.
+    """
+
+    decoder = json.JSONDecoder()
+
+    def __init__(self):
+        self.buf = b""
+
+    def feed(self, chunk):
+        self.buf += chunk
+
+    def pop(self):
+        try:
+            text = self.buf.decode("utf-8")
+        except UnicodeDecodeError:
+            return None  # multi-byte char split across chunks; feed() more
+        stripped = text.lstrip()
+        try:
+            obj, idx = self.decoder.raw_decode(stripped)
+        except ValueError:
+            return None  # no complete JSON message yet
+        segment = stripped[:idx].encode("utf-8")
+        self.buf = stripped[idx:].encode("utf-8")
+        return obj, segment
+
+
 def resolve_socket(path):
     name = "org.keepassxc.KeePassXC.BrowserServer"
     if path:
@@ -137,7 +172,14 @@ def resolve_socket(path):
 
 
 class SocketTransport:
-    """Direct AF_UNIX connection to a local KeePassXC browser-integration socket."""
+    """Direct AF_UNIX connection to a local KeePassXC browser-integration socket.
+
+    The local BrowserServer socket speaks bare JSON: one message per write, with
+    no length prefix and no delimiter. Native-messaging framing exists only on
+    a keepassxc-proxy's stdio; the proxy strips it before the socket.
+    """
+
+    framed = False
 
     def __init__(self, sock_path):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -158,10 +200,12 @@ class ExecTransport:
     """Byte stream to KeePassXC via a relay subprocess's stdin/stdout.
 
     The relay is normally `keepassxc-proxy` (KeePassXC's own native-messaging
-    proxy), which connects to the local socket / named pipe and speaks the same
-    4-byte-length-framed protocol over stdio. This is how we cross the WSL->Windows
-    boundary: WSL execs the Windows `keepassxc-proxy.exe`.
+    proxy), which connects to the local socket / named pipe and speaks the
+    4-byte-length-framed native-messaging protocol over stdio. This is how we
+    cross the WSL->Windows boundary: WSL execs the Windows `keepassxc-proxy.exe`.
     """
+
+    framed = True
 
     def __init__(self, argv):
         import subprocess
@@ -185,6 +229,7 @@ class Channel:
         self.client_id = b64e(os.urandom(NONCE_BYTES))
         self.server_pk = None
         self.transport = transport
+        self._raw = RawJSONStream()
 
     def _recv_exact(self, n):
         chunks = []
@@ -198,14 +243,28 @@ class Channel:
         return b"".join(chunks)
 
     def _send(self, obj):
-        # KeePassXC's local transport uses native-messaging framing:
-        # a 4-byte little-endian length prefix followed by the JSON payload.
         data = json.dumps(obj).encode("utf-8")
-        self.transport.send(struct.pack("<I", len(data)) + data)
+        if self.transport.framed:
+            # Native messaging over a proxy relay's stdio: a 4-byte
+            # little-endian length prefix followed by the JSON payload.
+            self.transport.send(struct.pack("<I", len(data)) + data)
+        else:
+            # The local BrowserServer socket reads bare JSON, unframed.
+            self.transport.send(data)
 
     def _recv_json(self):
-        (length,) = struct.unpack("<I", self._recv_exact(4))
-        return json.loads(self._recv_exact(length).decode("utf-8"))
+        if self.transport.framed:
+            (length,) = struct.unpack("<I", self._recv_exact(4))
+            return json.loads(self._recv_exact(length).decode("utf-8"))
+        # Bare JSON: parse incrementally out of the receive buffer.
+        while True:
+            parsed = self._raw.pop()
+            if parsed is not None:
+                return parsed[0]
+            chunk = self.transport.recv(BUF_SIZE)
+            if not chunk:
+                die("connection closed by KeePassXC")
+            self._raw.feed(chunk)
 
     def handshake(self):
         nonce = os.urandom(NONCE_BYTES)
@@ -272,6 +331,17 @@ class Channel:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return False
+            if not self.transport.framed:
+                # A broadcast may already be sitting in the raw buffer (it
+                # coalesced with an earlier reply in one recv()); select()
+                # cannot see buffered data, so drain before waiting.
+                parsed = self._raw.pop()
+                if parsed is not None:
+                    frame = parsed[0]
+                    if frame.get("action") == "database-unlocked" \
+                            and "message" not in frame:
+                        return True
+                    continue
             if fd is not None:
                 ready, _, _ = select.select([fd], [], [], remaining)
                 if not ready:
