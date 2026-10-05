@@ -2,10 +2,16 @@
 """Mock KeePassXC BrowserServer for offline end-to-end testing of kpxc-agent.
 
 Implements the server half of the protocol faithfully enough to exercise the real
-code paths: native-messaging length framing, the crypto_box handshake, per-connection
-association (get-logins refuses until test-associate has run on the connection), and
-the empty-ack frame that precedes a generate-password reply. Listens on an AF_UNIX
-socket (argv[1]).
+code paths: the bare-JSON transport the local BrowserServer socket speaks (no
+length framing - a proxy adds that), the crypto_box handshake, per-connection
+association (get-logins refuses until test-associate has run on the connection),
+and the empty-ack frame that precedes a generate-password reply. Listens on an
+AF_UNIX socket (argv[1]).
+
+With ``--proxy-stdio SOCKET`` it instead acts as a stand-in for keepassxc-proxy:
+it reads native-messaging framing on stdin, relays to the bare-JSON socket, and
+frames the replies back on stdout. This exercises the ExecTransport relay path
+(e.g. keepassxc-proxy.exe across WSL) offline.
 """
 import base64, ctypes, ctypes.util, json, os, socket, struct, sys, threading, time
 
@@ -81,24 +87,34 @@ DBGROUPS = {"groups": {"defaultGroup": "Root", "defaultGroupAlwaysAllow": False,
 def handle(conn):
     client_pk = [None]
     associated = [False]
+    buf = [b""]  # bare-JSON receive buffer; messages have no delimiter
 
     def recv():
-        hdr = b""
-        while len(hdr) < 4:
-            c = conn.recv(4 - len(hdr))
-            if not c: return None
-            hdr += c
-        (length,) = struct.unpack("<I", hdr)
-        buf = b""
-        while len(buf) < length:
-            c = conn.recv(length - len(buf))
-            if not c: return None
-            buf += c
-        return json.loads(buf)
+        # The real BrowserServer socket speaks bare JSON: parse the first
+        # complete message out of the buffer, reading more only when needed
+        # (messages can coalesce in one recv()).
+        while True:
+            if buf[0]:
+                try:
+                    text = buf[0].decode("utf-8")
+                except UnicodeDecodeError:
+                    text = None
+                if text is not None:
+                    stripped = text.lstrip()
+                    try:
+                        obj, idx = json.JSONDecoder().raw_decode(stripped)
+                    except ValueError:
+                        obj = None
+                    else:
+                        buf[0] = stripped[idx:].encode("utf-8")
+                        return obj
+            c = conn.recv(65536)
+            if not c:
+                return None
+            buf[0] += c
 
     def send(obj):
-        raw = json.dumps(obj).encode()
-        conn.sendall(struct.pack("<I", len(raw)) + raw)
+        conn.sendall(json.dumps(obj).encode())
 
     def reply_encrypted(action, data, req_nonce):
         rn = inc(req_nonce)
@@ -165,7 +181,47 @@ def handle(conn):
             send({"action": action, "error": "unknown action", "errorCode": "11"})
 
 
+def proxy_stdio(sock_path):
+    """Stand in for keepassxc-proxy: native messaging on stdio, bare JSON on the socket."""
+    upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    upstream.connect(sock_path)
+
+    def read_frame():
+        hdr = sys.stdin.buffer.read(4)
+        if len(hdr) < 4:
+            return None
+        (length,) = struct.unpack("<I", hdr)
+        payload = sys.stdin.buffer.read(length)
+        return payload if len(payload) == length else None
+
+    def relay(stdin_to_socket):
+        try:
+            if stdin_to_socket:
+                while True:
+                    frame = read_frame()
+                    if frame is None:
+                        break
+                    upstream.sendall(frame)
+            else:
+                while True:
+                    data = upstream.recv(65536)
+                    if not data:
+                        break
+                    sys.stdout.buffer.write(struct.pack("<I", len(data)) + data)
+                    sys.stdout.buffer.flush()
+        except OSError:
+            pass
+
+    t = threading.Thread(target=relay, args=(True,), daemon=True)
+    t.start()
+    relay(False)
+    t.join(timeout=1.0)
+
+
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "--proxy-stdio":
+        proxy_stdio(sys.argv[2])
+        return
     path = sys.argv[1]
     if os.path.exists(path):
         os.unlink(path)
