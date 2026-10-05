@@ -58,9 +58,10 @@ sed 's/^/      /' /tmp/kpxc_doctor.$$; rm -f /tmp/kpxc_doctor.$$
 "$AGENT" --help >/dev/null 2>&1 && ok "help renders" || bad "help failed"
 if "$AGENT" bogus-cmd >/dev/null 2>&1; then bad "unknown command should fail"; else ok "unknown command exits non-zero"; fi
 
-# 5. End-to-end against the framed mock KeePassXC (validates framing, the
-#    crypto_box handshake, per-connection test-associate, and the generate-password
-#    ack frame end to end - the parts that the unit checks above cannot cover).
+# 5. End-to-end against the bare-JSON mock KeePassXC (validates the raw-JSON
+#    transport, the crypto_box handshake, per-connection test-associate, and the
+#    generate-password ack frame end to end - the parts that the unit checks
+#    above cannot cover).
 if command -v jq >/dev/null 2>&1; then
     SOCK="$(mktemp -u /tmp/kpxc_mock.XXXXXX.sock)"
     "$PY" "$HERE/mock_kpxc.py" "$SOCK" 2>/dev/null &
@@ -232,6 +233,36 @@ if command -v jq >/dev/null 2>&1; then
     fi
     kill "$BRIDGE_PID" 2>/dev/null; wait "$BRIDGE_PID" 2>/dev/null || true
     rm -f "$BSOCK"
+
+    # 7. ExecTransport relay path: the mock's --proxy-stdio stand-in wraps the
+    #    mock's bare JSON in native-messaging framing over stdio, exactly as the
+    #    real keepassxc-proxy does (e.g. keepassxc-proxy.exe across the WSL
+    #    boundary). The channel must frame requests and unframe replies.
+    if epw=$(KPXC_SOCKET= KPXC_EXEC="$PY $HERE/mock_kpxc.py --proxy-stdio $SOCK" \
+            "$AGENT" get-logins https://box.example --field password 2>/dev/null) \
+        && [[ "$epw" == "p'q\"x y" ]]; then
+        ok "e2e: --exec relay speaks native-messaging framing over stdio"
+    else
+        bad "e2e: --exec relay (epw=${epw:-})"
+    fi
+
+    # 8. serve-bridge with a framed backend: the agent side of the bridge speaks
+    #    bare JSON, the proxy backend speaks native messaging - the bridge must
+    #    convert the framing in both directions.
+    B2SOCK="$(mktemp -u /tmp/kpxc_bridge2.XXXXXX.sock)"
+    "$AGENT" --exec "$PY $HERE/mock_kpxc.py --proxy-stdio $SOCK" \
+        serve-bridge --listen "unix:$B2SOCK" >/dev/null 2>&1 &
+    B2_PID=$!
+    for _ in $(seq 1 50); do [[ -S "$B2SOCK" ]] && break; sleep 0.05; done
+    if b2pw=$(KPXC_SOCKET="$B2SOCK" KPXC_EXEC= \
+            "$AGENT" get-logins https://box.example --field password 2>/dev/null) \
+        && [[ "$b2pw" == "p'q\"x y" ]]; then
+        ok "e2e: serve-bridge converts framing toward a framed proxy backend"
+    else
+        bad "e2e: serve-bridge framing conversion (b2pw=${b2pw:-})"
+    fi
+    kill "$B2_PID" 2>/dev/null; wait "$B2_PID" 2>/dev/null || true
+    rm -f "$B2SOCK"
 
     kill "$MOCK" 2>/dev/null; wait "$MOCK" 2>/dev/null || true
     rm -f "$SOCK"; rm -rf "$XDG_CONFIG_HOME"

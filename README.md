@@ -206,7 +206,8 @@ bash tests/selftest.sh
 
 Runs fully offline: the libsodium binding, a `crypto_box` round-trip, nonce-increment
 vectors, `doctor`, and a full **end-to-end flow against a mock KeePassXC**
-(`tests/mock_kpxc.py`) that reproduces the real framing, the per-connection
+(`tests/mock_kpxc.py`) that reproduces the real bare-JSON transport (plus a
+native-messaging proxy stand-in), the per-connection
 `test-associate` requirement, and the `generate-password` ack frame. It also covers the
 secret-hygiene guarantees — `--json` carrying no password, `--debug` masking one, a miss
 exiting 6, and `wait-db` unblocking on a database switch. No running KeePassXC is

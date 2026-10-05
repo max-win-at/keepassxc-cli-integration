@@ -8,12 +8,13 @@ box where KeePassXC is NOT reachable; KeePassXC lives on the client the user sit
 at. The client runs this bridge, ``ssh -R`` forwards its listening endpoint onto
 the box, and ``kpxc-agent --socket <forwarded>`` on the box talks straight to it.
 
-The bridge is a pure byte pump. It never decrypts or parses the protocol: each
-accepted connection gets its own transport to the local KeePassXC (a direct unix
-socket, or a ``keepassxc-proxy`` subprocess for the Windows named pipe), and bytes
-are shuttled verbatim in both directions until either side closes. The crypto and
-the per-connection ``test-associate`` stay end-to-end between the box's kpxc-agent
-and KeePassXC - exactly as if they shared a machine.
+The bridge relays traffic between the agent and the local KeePassXC transport.
+Toward the direct unix socket it is a pure byte pump. Toward a framed relay
+backend (``keepassxc-proxy`` over stdio) it converts framing - bare JSON on the
+agent side, native messaging on the relay side - without ever decrypting or
+inspecting the encrypted payloads: the crypto and the per-connection
+``test-associate`` stay end-to-end between the box's kpxc-agent and KeePassXC -
+exactly as if they shared a machine.
 
 Usage:
   kpxc_bridge.py --listen HOST:PORT  [--socket PATH | --exec CMD]
@@ -35,7 +36,10 @@ import sys
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kpxc_channel import SocketTransport, ExecTransport, resolve_socket  # noqa: E402
+from kpxc_channel import (  # noqa: E402
+    ExecTransport, RawJSONStream, SocketTransport, resolve_socket)
+
+import struct
 
 BUF = 65536
 
@@ -88,6 +92,54 @@ def pump(read, write):
         pass
 
 
+def recv_exact_framed(transport, n):
+    """Read exactly n bytes from a framed relay's stream (recv may return fewer)."""
+    chunks = []
+    got = 0
+    while got < n:
+        chunk = transport.recv(n - got)
+        if not chunk:
+            return None
+        chunks.append(chunk)
+        got += len(chunk)
+    return b"".join(chunks)
+
+
+def pump_raw_to_framed(read, transport):
+    """Agent side (bare JSON) -> relay side (native-messaging frames)."""
+    try:
+        stream = RawJSONStream()
+        while True:
+            data = read(BUF)
+            if not data:
+                break
+            stream.feed(data)
+            while True:
+                parsed = stream.pop()
+                if parsed is None:
+                    break
+                frame = struct.pack("<I", len(parsed[1])) + parsed[1]
+                transport.send(frame)
+    except (OSError, ValueError):
+        pass
+
+
+def pump_framed_to_raw(transport, write):
+    """Relay side (native-messaging frames) -> agent side (bare JSON)."""
+    try:
+        while True:
+            hdr = recv_exact_framed(transport, 4)
+            if hdr is None:
+                break
+            (length,) = struct.unpack("<I", hdr)
+            payload = recv_exact_framed(transport, length)
+            if payload is None:
+                break
+            write(payload)
+    except (OSError, ValueError):
+        pass
+
+
 def handle(conn, sock_path, exec_cmd):
     try:
         transport = make_transport(sock_path, exec_cmd)
@@ -102,13 +154,30 @@ def handle(conn, sock_path, exec_cmd):
     # direction's blocked recv() returns and the transport is released.
     done = threading.Event()
 
-    def direction(read, write):
-        pump(read, write)
+    if getattr(transport, "framed", False):
+        # The listening endpoint (the box's agent) speaks bare JSON; the relay's
+        # stdio speaks native messaging. Convert the framing in both directions;
+        # the encrypted payloads inside are relayed untouched.
+        def agent_to_relay():
+            pump_raw_to_framed(conn.recv, transport)
+
+        def relay_to_agent():
+            pump_framed_to_raw(transport, conn.sendall)
+    else:
+        # Direct unix-socket backend: bare JSON on both ends - a pure byte pump.
+        def agent_to_relay():
+            pump(conn.recv, transport.send)
+
+        def relay_to_agent():
+            pump(transport.recv, conn.sendall)
+
+    def direction(fn):
+        fn()
         done.set()
 
     threads = [
-        threading.Thread(target=direction, args=(conn.recv, transport.send), daemon=True),
-        threading.Thread(target=direction, args=(transport.recv, conn.sendall), daemon=True),
+        threading.Thread(target=direction, args=(agent_to_relay,), daemon=True),
+        threading.Thread(target=direction, args=(relay_to_agent,), daemon=True),
     ]
     for t in threads:
         t.start()

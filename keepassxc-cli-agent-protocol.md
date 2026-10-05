@@ -35,17 +35,27 @@ Reach KeePassXC either by connecting directly to its `AF_UNIX` stream socket
 over stdio (used to cross the WSL→Windows boundary; the proxy owns the Windows named
 pipe `\\.\pipe\org.keepassxc.KeePassXC.BrowserServer_<winuser>`).
 
+Framing depends on the transport:
+
+- The **direct socket speaks bare JSON**: one JSON message per write, with no length
+  prefix and no delimiter. Two messages can coalesce in the socket buffer (a reply and
+  the broadcast that follows it may arrive in one read), so a reader must buffer and
+  parse incrementally - the first complete JSON object in the buffer is one message.
+- The **proxy's stdio speaks native-messaging framing**: a 4-byte little-endian length
+  prefix followed by the JSON. The proxy adds this framing on the agent side and strips
+  it before talking to the socket on the agent's behalf.
+
 A third reachability path is a **reverse-forwarded socket**: when the agent runs on a
 remote box, the client runs `kpxc-agent serve-bridge` (which re-exposes one of the two
 transports above on a listening endpoint) and `ssh -R` forwards it onto the box, where
-the agent connects with `--socket`. The bridge is a transparent byte relay, so the
-framing and crypto below are unchanged — they remain end-to-end between the box's agent
-and KeePassXC. See the README's *Reaching KeePassXC across SSH* section.
+the agent connects with `--socket`. The bridge always speaks bare JSON on its listening
+side. Toward the direct socket it is a transparent byte relay; toward a framed proxy
+backend it converts bare JSON ⇄ native-messaging framing in both directions. The crypto
+below is unchanged — it remains end-to-end between the box's agent and KeePassXC.
+See the README's *Reaching KeePassXC across SSH* section.
 
-**Every message is framed** with native messaging framing: a 4-byte little-endian
-length prefix followed by the JSON. This applies to the direct socket and the proxy
-alike (the proxy forwards the same framed stream). KeePassXC pretty-prints its reply
-JSON, so read exactly `length` bytes rather than assuming one line per message.
+KeePassXC pretty-prints its reply JSON, so on the framed transport read exactly
+`length` bytes rather than assuming one line per message.
 
 ## Envelope
 
