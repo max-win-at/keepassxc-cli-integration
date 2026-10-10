@@ -15,3 +15,5 @@ __pycache__
 *.log
 *.bak
 *.tmp
+# agent-tool local settings (machine-specific)
+.agents/settings.local.json

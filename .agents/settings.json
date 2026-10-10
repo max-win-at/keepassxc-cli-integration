@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash -n kpxc-agent)",
+      "Bash(./kpxc-agent --help)",
+      "Bash(rtk bash *)",
+      "Bash(grep -n \"get-logins\\\\|Exit codes\\\\|^| \\\\`\\\\|^## \\\\|--json\\\\|errorCode\" README.md)",
+      "Bash(chmod +x skills/keepassxc-secrets/scripts/kpxc-agent)",
+      "Bash(bash -n skills/keepassxc-secrets/scripts/kpxc-agent)",
+      "Bash(./kpxc-agent db-info *)",
+      "Bash(./kpxc-agent get-logins *)",
+      "Bash(awk '{print $1}')",
+      "Bash(gh auth *)",
+      "Bash(git commit *)",
+      "Bash(gh pr create --title 'fix: fail loudly on credential misses, keep secrets out of --json' --body ' *)",
+      "Bash(rtk gh *)",
+      "Bash(gh pr create --title 'docs\\(skill\\): move flagged inline examples into fenced blocks' --body ' *)",
+      "Bash(gh pr create --title 'docs\\(skill\\): use $HOME instead of ~ for the associations.json path' --body ' *)"
+    ]
+  }
+}
