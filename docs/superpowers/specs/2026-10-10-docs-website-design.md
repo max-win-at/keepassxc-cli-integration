@@ -90,16 +90,15 @@ rounded corners, drop shadow.
    plain CSS keyed off the `dark` class, so the switch renders the
    system-resolved theme before Alpine loads), and inert window buttons
    (minimize / maximize / close) on the right.
-2. **Toolbar** (`#F9F9F9` / `#27272A`, 1px bottom border): KeePassXC icon groups
-   (Database, Entries, Entry Data, Tools) as inert inline SVG icons, plus a
-   working search input on the right (`Search…` placeholder) that filters the
-   install cards.
+2. **Toolbar** (`#F9F9F9` / `#27272A`, 1px bottom border): the five project
+   badges (skills.sh, agentskill.sh, GitHub repo, stars, forks) as linked
+   images in a row. No toolbar buttons, no search input.
 3. **Body**: left sidebar + content pane, 1px divider between them.
 
 ### 6.4 Sidebar ("Groups")
 
 KeePassXC group-tree look: header "Groups", tree rows with folder glyphs,
-clickable items — *Overview*, *Install*, *Badges & Links*, *About*. Clicking
+clickable items — *Overview*, *Install*, *About*. Clicking
 scrolls the content pane to the section and marks the row selected
 (`#507F1F` background, white text). Uses the alternate-row green
 (`#ECF3E8`) for hover, like KeePassXC's group view.
@@ -119,7 +118,7 @@ scrolls the content pane to the section and marks the row selected
   Each tab shows a description from the README and a copyable code block.
   Prerequisites line (jq, python3, libsodium, KeePassXC with Browser
   Integration) included under the tabs.
-- **Badges & Links** — the badges from the README:
+- **Badges & Links** — shown in the toolbar (see §6.3); the badges from the README:
   - skills.sh: `https://skills.sh/b/max-win-at/keepassxc-cli-integration`
   - agentskill.sh: `https://img.shields.io/badge/agentskill.sh-%40max--win--at%2Fkeepassxc--secrets-181717`
   - GitHub stars: `https://img.shields.io/github/stars/max-win-at/keepassxc-cli-integration`
@@ -138,8 +137,6 @@ scrolls the content pane to the section and marks the row selected
   class on `<html>`; a `matchMedia` listener follows OS changes unless the user
   has chosen explicitly. Applies before first paint via a tiny inline script to
   avoid flash.
-- **Search filter** — `x-model` on the toolbar input; filters install tab
-  content by simple substring match; empty state message when nothing matches.
 - **Install tabs** — `x-data` component; default tab: skills.sh.
 - **Copy buttons** — `navigator.clipboard.writeText`, with "Copied" feedback
   state for ~1.5 s.

@@ -101,30 +101,22 @@
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </div>
       </header>
-      <div class="flex items-center gap-4 px-3 py-1.5 bg-kpxc-base border-b border-kpxc-mid select-none overflow-x-auto">
-        <div class="flex items-center gap-3 text-kpxc-placeholder" aria-hidden="true" title="Database">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/></svg>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M19 21H5a2 2 0 01-2-2V9a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2z"/><path d="M7 7V5a2 2 0 012-2h6a2 2 0 012 2v2"/></svg>
-        </div>
-        <div class="w-px h-5 bg-kpxc-mid" aria-hidden="true"></div>
-        <div class="flex items-center gap-3 text-kpxc-placeholder" aria-hidden="true" title="Entries">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="5" y="4" width="16" height="16" rx="2"/><path d="M8 10h8M8 14h5"/><path d="M3 8v9"/></svg>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
-        </div>
-        <div class="w-px h-5 bg-kpxc-mid" aria-hidden="true"></div>
-        <div class="flex items-center gap-3 text-kpxc-placeholder" aria-hidden="true" title="Entry data">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="8" cy="15" r="4"/><path d="M11 12L21 2M17 6l3 3"/></svg>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M10 14a5 5 0 007.5.5l2-2a5 5 0 00-7-7l-1 1"/><path d="M14 10a5 5 0 00-7.5-.5l-2 2a5 5 0 007 7l1-1"/></svg>
-        </div>
-        <div class="w-px h-5 bg-kpxc-mid" aria-hidden="true"></div>
-        <div class="flex items-center gap-3 text-kpxc-placeholder" aria-hidden="true" title="Tools">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10l2.1 2.1M4.9 19.1L7 17m10-10l2.1-2.1"/></svg>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h.09a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h.09a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.09a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        </div>
-        <label class="ml-auto flex items-center gap-2 sr-only" for="search-input">Search install methods</label>
-        <input id="search-input" type="search" x-model="$store.search.q" placeholder="Search…" class="ml-auto w-40 sm:w-52 rounded border border-kpxc-mid bg-kpxc-window placeholder-kpxc-placeholder px-2 py-1 text-sm outline-none focus:border-kpxc-green focus:ring-1 focus:ring-kpxc-green" autocomplete="off">
+      <div id="toolbar" class="flex items-center flex-wrap gap-2 px-3 py-1.5 bg-kpxc-base border-b border-kpxc-mid" aria-label="Badges and links">
+        <a href="https://skills.sh/max-win-at/keepassxc-cli-integration" title="skills.sh">
+          <img src="https://skills.sh/b/max-win-at/keepassxc-cli-integration" alt="skills.sh: max-win-at/keepassxc-cli-integration" loading="lazy" class="h-5 rounded-sm">
+        </a>
+        <a href="https://agentskill.sh/@max-win-at/keepassxc-secrets" title="agentskill.sh">
+          <img src="https://img.shields.io/badge/agentskill.sh-%40max--win--at%2Fkeepassxc--secrets-181717" alt="agentskill.sh: @max-win-at/keepassxc-secrets" loading="lazy" class="h-5 rounded-sm">
+        </a>
+        <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub repository">
+          <img src="https://img.shields.io/badge/github-max--win--at%2Fkeepassxc--cli--integration-181717" alt="GitHub: max-win-at/keepassxc-cli-integration" loading="lazy" class="h-5 rounded-sm">
+        </a>
+        <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub stars">
+          <img src="https://img.shields.io/github/stars/max-win-at/keepassxc-cli-integration" alt="GitHub stars" loading="lazy" class="h-5 rounded-sm">
+        </a>
+        <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub forks">
+          <img src="https://img.shields.io/github/forks/max-win-at/keepassxc-cli-integration" alt="GitHub forks" loading="lazy" class="h-5 rounded-sm">
+        </a>
       </div>
       <div class="flex">
         <nav id="groups-sidebar" class="hidden md:flex flex-col w-56 shrink-0 bg-kpxc-base border-r border-kpxc-mid select-none" aria-label="Groups">
@@ -141,12 +133,7 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
             Install
           </button>
-          <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt"
-                  :class="$store.nav.active === 'section-badges' ? 'bg-kpxc-green text-white' : ''"
-                  @click="goSection('section-badges')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="9" r="5"/><path d="M8.5 13.5L7 21l5-3 5 3-1.5-7.5"/></svg>
-            Badges &amp; Links
-          </button>
+          
           <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt"
                   :class="$store.nav.active === 'section-about' ? 'bg-kpxc-green text-white' : ''"
                   @click="goSection('section-about')">
@@ -176,8 +163,7 @@
             </div>
             <p class="mt-3 text-sm text-kpxc-placeholder">Pair once; every later fetch, generation, or store runs unattended.</p>
           </section>
-          <section id="section-install" class="px-6 pt-2" x-data="installTabs()"
-                   x-effect="if (!matches(tab)) { tab = ['skills', 'agentskill', 'standalone'].find(id => matches(id)) || tab; }">
+          <section id="section-install" class="px-6 pt-2" x-data="installTabs()">
             <h2 class="text-lg font-semibold">Install</h2>
             <p class="mt-1 text-sm text-kpxc-placeholder">The tool ships inside the agent skill — installing the skill installs the CLI.</p>
             <div class="mt-3 flex gap-1 border-b border-kpxc-mid" role="tablist" aria-label="Install methods">
@@ -192,7 +178,7 @@
                       :class="tab === 'standalone' ? 'bg-kpxc-alt border-kpxc-mid' : 'text-kpxc-placeholder hover:bg-kpxc-alt border-transparent'">Standalone CLI</button>
             </div>
 
-            <div x-show="tab === 'skills' && matches('skills')" x-cloak class="pt-4" role="tabpanel">
+            <div x-show="tab === 'skills'" x-cloak class="pt-4" role="tabpanel">
               <p class="max-w-2xl text-sm leading-relaxed" x-text="tabs.skills.desc"></p>
               <div class="mt-3 max-w-2xl rounded border border-kpxc-mid bg-kpxc-base">
                 <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid text-xs text-kpxc-placeholder">
@@ -205,7 +191,7 @@
               </div>
             </div>
 
-            <div x-show="tab === 'agentskill' && matches('agentskill')" x-cloak class="pt-4" role="tabpanel">
+            <div x-show="tab === 'agentskill'" x-cloak class="pt-4" role="tabpanel">
               <p class="max-w-2xl text-sm leading-relaxed" x-text="tabs.agentskill.desc"></p>
               <div class="mt-3 max-w-2xl rounded border border-kpxc-mid bg-kpxc-base">
                 <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid text-xs text-kpxc-placeholder">
@@ -218,7 +204,7 @@
               </div>
             </div>
 
-            <div x-show="tab === 'standalone' && matches('standalone')" x-cloak class="pt-4" role="tabpanel">
+            <div x-show="tab === 'standalone'" x-cloak class="pt-4" role="tabpanel">
               <p class="max-w-2xl text-sm leading-relaxed" x-text="tabs.standalone.desc"></p>
               <div class="mt-3 max-w-2xl rounded border border-kpxc-mid bg-kpxc-base">
                 <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid text-xs text-kpxc-placeholder">
@@ -231,30 +217,11 @@
               </div>
             </div>
 
-            <p x-show="!matches('skills') && !matches('agentskill') && !matches('standalone')" x-cloak class="pt-4 text-sm text-kpxc-placeholder">No install method matches your search.</p>
+            
 
             <p class="mt-4 pb-4 text-sm text-kpxc-placeholder"><span class="font-medium">Prerequisites</span> — <code class="text-sm">jq</code>, <code class="text-sm">python3</code> (stdlib only), and <code class="text-sm">libsodium</code>, plus KeePassXC running with <span class="font-medium">Browser Integration</span> enabled. Run <code class="text-sm">kpxc-agent doctor</code> to check everything at once.</p>
           </section>
-          <section id="section-badges" class="px-6 pt-2">
-            <h2 class="text-lg font-semibold">Badges &amp; Links</h2>
-            <div class="mt-3 flex flex-wrap items-center gap-2 pb-4">
-              <a href="https://skills.sh/max-win-at/keepassxc-cli-integration" title="skills.sh">
-                <img src="https://skills.sh/b/max-win-at/keepassxc-cli-integration" alt="skills.sh: max-win-at/keepassxc-cli-integration" loading="lazy" class="rounded-sm">
-              </a>
-              <a href="https://agentskill.sh/@max-win-at/keepassxc-secrets" title="agentskill.sh">
-                <img src="https://img.shields.io/badge/agentskill.sh-%40max--win--at%2Fkeepassxc--secrets-181717" alt="agentskill.sh: @max-win-at/keepassxc-secrets" loading="lazy" class="rounded-sm">
-              </a>
-              <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub repository">
-                <img src="https://img.shields.io/badge/github-max--win--at%2Fkeepassxc--cli--integration-181717" alt="GitHub: max-win-at/keepassxc-cli-integration" loading="lazy" class="rounded-sm">
-              </a>
-              <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub stars">
-                <img src="https://img.shields.io/github/stars/max-win-at/keepassxc-cli-integration" alt="GitHub stars" loading="lazy" class="rounded-sm">
-              </a>
-              <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub forks">
-                <img src="https://img.shields.io/github/forks/max-win-at/keepassxc-cli-integration" alt="GitHub forks" loading="lazy" class="rounded-sm">
-              </a>
-            </div>
-          </section>
+
           <section id="section-about" class="px-6 pt-2">
             <h2 class="text-lg font-semibold">About</h2>
             <p class="mt-1 max-w-2xl text-sm leading-relaxed">
@@ -294,7 +261,6 @@
       document.documentElement.classList.toggle('dark', e.matches);
     });
 
-    Alpine.store('search', { q: '' });
     Alpine.store('nav', { active: 'section-overview', copied: '' });
 
     window.goSection = function (id) {
@@ -348,16 +314,7 @@
             + 'kpxc-agent doctor',
         },
       };
-      return {
-        tab: 'skills',
-        tabs,
-        matches(id) {
-          const q = Alpine.store('search').q.trim().toLowerCase();
-          if (!q) { return true; }
-          const t = tabs[id];
-          return (t.label + ' ' + t.desc + ' ' + t.cmd).toLowerCase().includes(q);
-        },
-      };
+      return { tab: 'skills', tabs };
     };
 
     Alpine.start();
