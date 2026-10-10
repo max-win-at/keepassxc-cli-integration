@@ -141,7 +141,68 @@
             </div>
             <p class="mt-3 text-sm text-kpxc-placeholder dark:text-kpxc-placeholder">Pair once; every later fetch, generation, or store runs unattended.</p>
           </section>
-          <section id="section-install" class="px-6 pt-2"></section>
+          <section id="section-install" class="px-6 pt-2" x-data="installTabs()"
+                   x-effect="if (!matches(tab)) { tab = ['skills', 'agentskill', 'standalone'].find(id => matches(id)) || tab; }">
+            <h2 class="text-lg font-semibold">Install</h2>
+            <p class="mt-1 text-sm text-kpxc-placeholder dark:text-kpxc-placeholder">The tool ships inside the agent skill — installing the skill installs the CLI.</p>
+            <div class="mt-3 flex gap-1 border-b border-kpxc-mid dark:border-kpxc-mid" role="tablist" aria-label="Install methods">
+              <button type="button" role="tab" @click="tab = 'skills'" :aria-selected="tab === 'skills'"
+                      class="px-3 py-1.5 text-sm rounded-t -mb-px border border-b-0"
+                      :class="tab === 'skills' ? 'bg-kpxc-alt dark:bg-kpxc-alt border-kpxc-mid dark:border-kpxc-mid' : 'text-kpxc-placeholder dark:text-kpxc-placeholder hover:bg-kpxc-alt dark:hover:bg-kpxc-alt border-transparent'">skills.sh (Vercel)</button>
+              <button type="button" role="tab" @click="tab = 'agentskill'" :aria-selected="tab === 'agentskill'"
+                      class="px-3 py-1.5 text-sm rounded-t -mb-px border border-b-0"
+                      :class="tab === 'agentskill' ? 'bg-kpxc-alt dark:bg-kpxc-alt border-kpxc-mid dark:border-kpxc-mid' : 'text-kpxc-placeholder dark:text-kpxc-placeholder hover:bg-kpxc-alt dark:hover:bg-kpxc-alt border-transparent'">agentskill.sh</button>
+              <button type="button" role="tab" @click="tab = 'standalone'" :aria-selected="tab === 'standalone'"
+                      class="px-3 py-1.5 text-sm rounded-t -mb-px border border-b-0"
+                      :class="tab === 'standalone' ? 'bg-kpxc-alt dark:bg-kpxc-alt border-kpxc-mid dark:border-kpxc-mid' : 'text-kpxc-placeholder dark:text-kpxc-placeholder hover:bg-kpxc-alt dark:hover:bg-kpxc-alt border-transparent'">Standalone CLI</button>
+            </div>
+
+            <div x-show="tab === 'skills' && matches('skills')" class="pt-4" role="tabpanel">
+              <p class="max-w-2xl text-sm leading-relaxed">Any agent supported by the <span class="font-medium">skills</span> CLI: Claude Code, Cursor, Codex, Copilot, Windsurf, …</p>
+              <div class="mt-3 max-w-2xl rounded border border-kpxc-mid dark:border-kpxc-mid bg-kpxc-base dark:bg-kpxc-base">
+                <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid dark:border-kpxc-mid text-xs text-kpxc-placeholder dark:text-kpxc-placeholder">
+                  <span>via skills.sh</span>
+                  <button type="button" class="rounded px-2 py-0.5 text-xs bg-kpxc-button dark:bg-kpxc-button hover:bg-kpxc-alt dark:hover:bg-kpxc-alt font-medium" @click="copy('npx skills add max-win-at/keepassxc-cli-integration --skill keepassxc-secrets', 'install-skills')" aria-label="Copy skills.sh install command">
+                    <span aria-live="polite"><template x-if="nav.copied === 'install-skills'">Copied</template><template x-if="nav.copied !== 'install-skills'">Copy</template></span>
+                  </button>
+                </div>
+                <pre class="px-3 py-2 overflow-x-auto text-sm"><code>npx skills add max-win-at/keepassxc-cli-integration --skill keepassxc-secrets</code></pre>
+              </div>
+            </div>
+
+            <div x-show="tab === 'agentskill' && matches('agentskill')" class="pt-4" role="tabpanel">
+              <p class="max-w-2xl text-sm leading-relaxed">Harnesses with the <span class="font-medium">/learn</span> command: Claude Code, Copilot CLI, Gemini CLI, Cursor, Codex CLI, …</p>
+              <div class="mt-3 max-w-2xl rounded border border-kpxc-mid dark:border-kpxc-mid bg-kpxc-base dark:bg-kpxc-base">
+                <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid dark:border-kpxc-mid text-xs text-kpxc-placeholder dark:text-kpxc-placeholder">
+                  <span>via agentskill.sh</span>
+                  <button type="button" class="rounded px-2 py-0.5 text-xs bg-kpxc-button dark:bg-kpxc-button hover:bg-kpxc-alt dark:hover:bg-kpxc-alt font-medium" @click="copy('/learn @max-win-at/keepassxc-secrets', 'install-agentskill')" aria-label="Copy agentskill.sh install command">
+                    <span aria-live="polite"><template x-if="nav.copied === 'install-agentskill'">Copied</template><template x-if="nav.copied !== 'install-agentskill'">Copy</template></span>
+                  </button>
+                </div>
+                <pre class="px-3 py-2 overflow-x-auto text-sm"><code>/learn @max-win-at/keepassxc-secrets</code></pre>
+              </div>
+              <p class="mt-2 text-sm text-kpxc-placeholder dark:text-kpxc-placeholder">If your harness does not have <code class="text-sm">/learn</code> yet, add it first with <code class="text-sm">npx @agentskill.sh/cli@latest setup</code>.</p>
+            </div>
+
+            <div x-show="tab === 'standalone' && matches('standalone')" class="pt-4" role="tabpanel">
+              <p class="max-w-2xl text-sm leading-relaxed">Clone the repository, symlink the script onto your <code class="text-sm">PATH</code>, and check the environment.</p>
+              <div class="mt-3 max-w-2xl rounded border border-kpxc-mid dark:border-kpxc-mid bg-kpxc-base dark:bg-kpxc-base">
+                <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid dark:border-kpxc-mid text-xs text-kpxc-placeholder dark:text-kpxc-placeholder">
+                  <span>standalone CLI</span>
+                  <button type="button" class="rounded px-2 py-0.5 text-xs bg-kpxc-button dark:bg-kpxc-button hover:bg-kpxc-alt dark:hover:bg-kpxc-alt font-medium" @click="copy('git clone https://github.com/max-win-at/keepassxc-cli-integration.git\nln -s &quot;$PWD/keepassxc-cli-integration/skills/keepassxc-secrets/scripts/kpxc-agent&quot; ~/.local/bin/kpxc-agent\nkpxc-agent doctor', 'install-standalone')" aria-label="Copy standalone install commands">
+                    <span aria-live="polite"><template x-if="nav.copied === 'install-standalone'">Copied</template><template x-if="nav.copied !== 'install-standalone'">Copy</template></span>
+                  </button>
+                </div>
+                <pre class="px-3 py-2 overflow-x-auto text-sm"><code>git clone https://github.com/max-win-at/keepassxc-cli-integration.git
+ln -s "$PWD/keepassxc-cli-integration/skills/keepassxc-secrets/scripts/kpxc-agent" ~/.local/bin/kpxc-agent
+kpxc-agent doctor</code></pre>
+              </div>
+            </div>
+
+            <p x-show="!matches('skills') && !matches('agentskill') && !matches('standalone')" class="pt-4 text-sm text-kpxc-placeholder dark:text-kpxc-placeholder">No install method matches your search.</p>
+
+            <p class="mt-4 pb-4 text-sm text-kpxc-placeholder dark:text-kpxc-placeholder"><span class="font-medium">Prerequisites</span> — <code class="text-sm">jq</code>, <code class="text-sm">python3</code> (stdlib only), and <code class="text-sm">libsodium</code>, plus KeePassXC running with <span class="font-medium">Browser Integration</span> enabled. Run <code class="text-sm">kpxc-agent doctor</code> to check everything at once.</p>
+          </section>
           <section id="section-badges" class="px-6 pt-2"></section>
           <section id="section-about" class="px-6 pt-2"></section>
         </div>
@@ -202,6 +263,35 @@
       nav.copied = btnId;
       clearTimeout(window.copyTimer);
       window.copyTimer = setTimeout(() => { nav.copied = ''; }, 1500);
+    };
+
+    window.installTabs = function () {
+      const tabs = {
+        skills: {
+          label: 'skills.sh (Vercel)',
+          desc: 'Any agent supported by the skills CLI: Claude Code, Cursor, Codex, Copilot, Windsurf, …',
+          cmd: 'npx skills add max-win-at/keepassxc-cli-integration --skill keepassxc-secrets',
+        },
+        agentskill: {
+          label: 'agentskill.sh',
+          desc: 'Harnesses with the /learn command: Claude Code, Copilot CLI, Gemini CLI, Cursor, Codex CLI, …',
+          cmd: '/learn @max-win-at/keepassxc-secrets npx @agentskill.sh/cli@latest setup',
+        },
+        standalone: {
+          label: 'Standalone CLI',
+          desc: 'Clone the repository, symlink the script onto your PATH, and check the environment.',
+          cmd: 'git clone https://github.com/max-win-at/keepassxc-cli-integration.git ln -s kpxc-agent ~/.local/bin/kpxc-agent kpxc-agent doctor',
+        },
+      };
+      return {
+        tab: 'skills',
+        matches(id) {
+          const q = Alpine.store('search').q.trim().toLowerCase();
+          if (!q) { return true; }
+          const t = tabs[id];
+          return (t.label + ' ' + t.desc + ' ' + t.cmd).toLowerCase().includes(q);
+        },
+      };
     };
 
     Alpine.start();
