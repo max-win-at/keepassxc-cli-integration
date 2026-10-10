@@ -85,9 +85,11 @@ rounded corners, drop shadow.
 
 1. **Title bar** (`#F7F7F7` / `#3B3B3D`): small KeePassXC-style shield-with-key
    inline SVG, title "kpxc-agent — KeePassXC secrets for AI agents", a
-   decorative database tab chip ("vault.kdbx"), a lock icon, the theme toggle
-   button (sun/moon icon), and inert window buttons (minimize / maximize /
-   close) on the right.
+   decorative database tab chip ("vault.kdbx"), a lock icon, a light/dark
+   toggle **switch** (sun and moon icons; knob position and active icon are
+   plain CSS keyed off the `dark` class, so the switch renders the
+   system-resolved theme before Alpine loads), and inert window buttons
+   (minimize / maximize / close) on the right.
 2. **Toolbar** (`#F9F9F9` / `#27272A`, 1px bottom border): KeePassXC icon groups
    (Database, Entries, Entry Data, Tools) as inert inline SVG icons, plus a
    working search input on the right (`Search…` placeholder) that filters the
