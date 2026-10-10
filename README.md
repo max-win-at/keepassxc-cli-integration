@@ -31,27 +31,27 @@ tool is that feature for the terminal.
 
 ## Install
 
-`kpxc-agent` is a single script plus a small python helper in `lib/`. It resolves `lib/`
-relative to its own real location (following symlinks), so symlink it onto your `PATH` —
-or add the scripts dir directly:
+The tool ships inside the agent skill at
+[`skills/keepassxc-secrets/scripts/`](skills/keepassxc-secrets/scripts/) — that copy is
+the canonical source, and it keeps the skill self-contained when installed from a skill
+marketplace. `kpxc-agent` is a single script plus a small python helper in
+`scripts/lib/`; the script resolves `lib/` relative to its own real location (following
+symlinks), so it works identically no matter which way you install it:
+
+### Standalone CLI
 
 ```bash
 git clone https://github.com/max-win-at/keepassxc-cli-integration.git
 ln -s "$PWD/keepassxc-cli-integration/skills/keepassxc-secrets/scripts/kpxc-agent" ~/.local/bin/kpxc-agent
+# or: export PATH="$PWD/keepassxc-cli-integration/skills/keepassxc-secrets/scripts:$PATH"
 kpxc-agent doctor
 ```
 
-The tool lives at
-[`skills/keepassxc-secrets/scripts/`](skills/keepassxc-secrets/scripts/) — inside the
-agent skill, so the skill is self-contained when installed from a skill marketplace.
-That copy is the canonical source; there is no separate top-level copy.
+### Agent skill (AI harnesses)
 
-### Installing the skill
-
-For agent/AI use, an Agent Skill that teaches this CLI lives in
-[`skills/keepassxc-secrets/`](skills/keepassxc-secrets/SKILL.md) — it bundles the CLI,
-so installing the skill is also a way to install the tool. Two skill marketplaces
-support it:
+The Agent Skill at [`skills/keepassxc-secrets/`](skills/keepassxc-secrets/SKILL.md)
+teaches a harness to drive this CLI and bundles it, so installing the skill also puts
+the tool on the machine. Two skill marketplaces support it:
 
 **via [agentskill.sh](https://agentskill.sh)** — harnesses with the `/learn` command
 (Claude Code, Copilot CLI, Gemini CLI, Cursor, Codex CLI, …):
