@@ -33,31 +33,53 @@ tool is that feature for the terminal.
 
 `kpxc-agent` is a single script plus a small python helper in `lib/`. It resolves `lib/`
 relative to its own real location (following symlinks), so symlink it onto your `PATH` —
-or add the repo dir directly:
+or add the scripts dir directly:
 
 ```bash
 git clone https://github.com/max-win-at/keepassxc-cli-integration.git
-ln -s "$PWD/keepassxc-cli-integration/kpxc-agent" ~/.local/bin/kpxc-agent  # or: export PATH="$PWD/keepassxc-cli-integration:$PATH"
+ln -s "$PWD/keepassxc-cli-integration/skills/keepassxc-secrets/scripts/kpxc-agent" ~/.local/bin/kpxc-agent
 kpxc-agent doctor
 ```
 
-For agent/AI use, an Agent Skill that teaches this CLI lives in
-[`skills/keepassxc-secrets/`](skills/keepassxc-secrets/SKILL.md).
+The tool lives at
+[`skills/keepassxc-secrets/scripts/`](skills/keepassxc-secrets/scripts/) — inside the
+agent skill, so the skill is self-contained when installed from a skill marketplace.
+That copy is the canonical source; there is no separate top-level copy.
 
 ### Installing the skill
 
-**Harnesses with [agentskill.sh](https://agentskill.sh)** (Claude Code, Copilot CLI, Gemini CLI):
+For agent/AI use, an Agent Skill that teaches this CLI lives in
+[`skills/keepassxc-secrets/`](skills/keepassxc-secrets/SKILL.md) — it bundles the CLI,
+so installing the skill is also a way to install the tool. Two skill marketplaces
+support it:
 
-Once published, one command installs it:
+**via [agentskill.sh](https://agentskill.sh)** — harnesses with the `/learn` command
+(Claude Code, Copilot CLI, Gemini CLI, Cursor, Codex CLI, …):
+
+If your harness doesn't have `/learn` yet, add it first — see the
+[setup instructions](https://agentskill.sh/install) or the
+[CLI repo](https://github.com/agentskill-sh/ags) (`npx @agentskill.sh/cli@latest setup`).
+Then, once published:
+
 ```
 /learn @maxwin/keepassxc-secrets
 ```
-Until published: copy the `skills/keepassxc-secrets/` directory into your harness's skills
-directory (e.g. `~/.claude/skills/` for Claude Code) and the harness will pick it up.
 
-**Harnesses without agentskill.sh** (Cursor, Codex CLI, bare Copilot, etc.):
-Paste the contents of `skills/keepassxc-secrets/SKILL.md` into the harness's
-custom-instructions or rules file.
+**via [skills.sh](https://skills.sh)** (Vercel) — any agent supported by the `skills`
+CLI (Claude Code, Cursor, Codex, Copilot, Windsurf, …):
+
+The CLI installs straight from a git repo, so this works already — no registry
+submission needed (installs surface on skills.sh automatically). See the
+[setup instructions](https://github.com/vercel-labs/skills) for all options:
+
+```bash
+npx skills add max-win-at/keepassxc-cli-integration --skill keepassxc-secrets
+```
+
+**Without a marketplace**: copy the `skills/keepassxc-secrets/` directory into your
+harness's skills directory (e.g. `~/.claude/skills/` for Claude Code) and the harness
+will pick it up. Harnesses without a skills directory: paste the contents of
+`skills/keepassxc-secrets/SKILL.md` into the harness's custom-instructions or rules file.
 
 ## Prerequisites
 
@@ -69,7 +91,7 @@ custom-instructions or rules file.
 - For the relay transport (e.g. WSL → Windows), **`keepassxc-proxy`** — it ships with
   KeePassXC, so it is already present wherever KeePassXC is installed.
 
-Run `./kpxc-agent doctor` to check all of these and the transport to KeePassXC.
+Run `kpxc-agent doctor` to check all of these and the transport to KeePassXC.
 
 ## Quick start
 
@@ -77,22 +99,22 @@ Run `./kpxc-agent doctor` to check all of these and the transport to KeePassXC.
 # 1. One-time pairing. KeePassXC pops a dialog asking you to name the connection.
 #    The association is saved to disk automatically (see below), so you do not need
 #    to capture anything for normal local use:
-./kpxc-agent associate
+kpxc-agent associate
 
 # 2. Fetch a secret (default output is shell-evalable). No env setup needed — the
 #    saved association is reused, and a locked/closed KeePassXC is prompted to unlock:
-eval "$(./kpxc-agent get-logins https://host.example)"
+eval "$(kpxc-agent get-logins https://host.example)"
 echo "$KPXC_USERNAME / $KPXC_PASSWORD"
 
 # ...or grab a single field. Always capture it — never run this bare, or the password
 # ends up in your terminal scrollback and in any agent's transcript:
-pw=$(./kpxc-agent get-logins https://host.example --field password)
+pw=$(kpxc-agent get-logins https://host.example --field password)
 
 # 3. When a lookup finds nothing it exits 6 (not 0-with-empty-output). Two causes,
 #    two diagnostics:
-./kpxc-agent db-info                                   # which vault is actually open?
-./kpxc-agent probe https://host.example https://example.com   # which URL variants match?
-./kpxc-agent wait-db --changed                         # block while the user switches vaults
+kpxc-agent db-info                                   # which vault is actually open?
+kpxc-agent probe https://host.example https://example.com   # which URL variants match?
+kpxc-agent wait-db --changed                         # block while the user switches vaults
 ```
 
 ### Choosing among several matches
@@ -101,9 +123,9 @@ pw=$(./kpxc-agent get-logins https://host.example --field password)
 password. List first, then fetch the one you picked:
 
 ```bash
-./kpxc-agent get-logins https://host.example --json
+kpxc-agent get-logins https://host.example --json
 # [{"uuid":"a1b2…","name":"Box prod","login":"admin"},{"uuid":"c3d4…","name":"Box staging",…}]
-pw=$(./kpxc-agent get-logins https://host.example --field password --entry-uuid a1b2…)
+pw=$(kpxc-agent get-logins https://host.example --field password --entry-uuid a1b2…)
 ```
 
 ## Identity & deployment topologies
