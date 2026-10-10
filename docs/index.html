@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script>
+    // Pre-paint theme resolution: runs before any rendering to avoid a flash.
+    (function () {
+      var mode = null;
+      try { mode = window.localStorage.getItem('kpxc-theme'); } catch (e) { /* private mode */ }
+      if (mode !== 'light' && mode !== 'dark') {
+        mode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      if (mode === 'dark') { document.documentElement.classList.add('dark'); }
+    })();
+  </script>
+  <title>kpxc-agent — KeePassXC secrets for AI agents</title>
+  <meta name="description" content="kpxc-agent speaks the same end-to-end encrypted protocol as the KeePassXC browser extension — but for the terminal, so AI agents can fetch, generate, and store secrets without them ever reaching a log, a transcript, or a dotfile.">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            kpxc: {
+              window:    ['#F7F7F7', '#3B3B3D'],
+              base:      ['#F9F9F9', '#27272A'],
+              alt:       ['#ECF3E8', '#2C2C30'],
+              green:     ['#507F1F', '#2D532D'],
+              'green-hi':['#568821', '#2E582E'],
+              link:      ['#4B7B19', '#68B668'],
+              text:      ['#1D1D20', '#CACBCE'],
+              placeholder:['#71727D', '#7D7D82'],
+              button:    ['#D4D5DD', '#28282B'],
+              mid:       ['#C9C9CF', '#2F2F32'],
+              border:    ['#BBBBC2', '#202022'],
+            },
+          },
+        },
+      },
+    };
+  </script>
+</head>
+<body class="min-h-screen bg-kpxc-base text-kpxc-text dark:bg-kpxc-base dark:text-kpxc-text" style="font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  <div id="backdrop" class="min-h-screen grid place-items-center p-4 sm:p-8" style="background: linear-gradient(160deg, #27272A 0%, #202022 100%);">
+    <div id="kpxc-window" class="w-full max-w-5xl rounded-lg border border-kpxc-border dark:border-kpxc-border bg-kpxc-window dark:bg-kpxc-window shadow-2xl overflow-hidden">
+    </div>
+  </div>
+</body>
+</html>
