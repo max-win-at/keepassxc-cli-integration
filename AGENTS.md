@@ -136,3 +136,7 @@ rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 
 Overall average: **60-90% token reduction** on common development operations.
 <!-- /rtk-instructions -->
+
+# GIT
+
+When adding a feature, code, anything, always pull latest main and create a branch for that. Semantic commit into that branch, push and PR when done. Switch back to main. Delete branches that had been merged. 
