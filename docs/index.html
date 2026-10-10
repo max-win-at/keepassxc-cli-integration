@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script>
+    // Pre-paint theme resolution: runs before any rendering to avoid a flash.
+    (function () {
+      var mode = null;
+      try { mode = window.localStorage.getItem('kpxc-theme'); } catch (e) { /* private mode */ }
+      if (mode !== 'light' && mode !== 'dark') {
+        mode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      if (mode === 'dark') { document.documentElement.classList.add('dark'); }
+    })();
+  </script>
+  <title>kpxc-agent — KeePassXC secrets for AI agents</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23507F1F' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l7 2.5v5.2c0 4.6-3 8.4-7 9.8-4-1.4-7-5.2-7-9.8V5.5L12 3z'/%3E%3Ccircle cx='12' cy='10' r='1.6'/%3E%3Cpath d='M12 11.6v4'/%3E%3C/svg%3E">
+  <meta name="description" content="kpxc-agent speaks the same end-to-end encrypted protocol as the KeePassXC browser extension — but for the terminal, so AI agents can fetch, generate, and store secrets without them ever reaching a log, a transcript, or a dotfile.">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            kpxc: {
+              window: 'var(--kpxc-window)',
+              base: 'var(--kpxc-base)',
+              alt: 'var(--kpxc-alt)',
+              green: 'var(--kpxc-green)',
+              'green-hi': 'var(--kpxc-green-hi)',
+              link: 'var(--kpxc-link)',
+              text: 'var(--kpxc-text)',
+              placeholder: 'var(--kpxc-placeholder)',
+              button: 'var(--kpxc-button)',
+              mid: 'var(--kpxc-mid)',
+              border: 'var(--kpxc-border)',
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    :root {
+      --kpxc-window: #F7F7F7; --kpxc-base: #F9F9F9; --kpxc-alt: #ECF3E8;
+      --kpxc-green: #507F1F; --kpxc-green-hi: #568821; --kpxc-link: #4B7B19;
+      --kpxc-text: #1D1D20; --kpxc-placeholder: #71727D; --kpxc-button: #D4D5DD;
+      --kpxc-mid: #C9C9CF; --kpxc-border: #BBBBC2;
+    }
+    .dark {
+      --kpxc-window: #3B3B3D; --kpxc-base: #27272A; --kpxc-alt: #2C2C30;
+      --kpxc-green: #2D532D; --kpxc-green-hi: #2E582E; --kpxc-link: #68B668;
+      --kpxc-text: #CACBCE; --kpxc-placeholder: #7D7D82; --kpxc-button: #28282B;
+      --kpxc-mid: #2F2F32; --kpxc-border: #202022;
+    }
+    /* Hide Alpine-driven elements until Alpine initializes them. */
+    [x-cloak] { display: none !important; }
+    /* Theme switch: knob position and icons are pure CSS off html.dark,
+       so the switch renders the pre-paint-resolved (system) theme with no flash. */
+    #theme-switch .knob { transform: translateX(0); transition: transform 0.15s ease; }
+    html.dark #theme-switch .knob { transform: translateX(20px); }
+    #theme-switch .knob .icon-dark { display: none; }
+    html.dark #theme-switch .knob .icon-dark { display: block; }
+    html.dark #theme-switch .knob .icon-light { display: none; }
+    #theme-switch .hint-light { display: none; }
+    html.dark #theme-switch .hint-light { display: block; }
+    html.dark #theme-switch .hint-dark { display: none; }
+  </style>
+</head>
+<body x-data class="min-h-screen bg-kpxc-base text-kpxc-text" style="font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  <div id="backdrop" class="min-h-screen grid place-items-center p-4 sm:p-8" style="background: linear-gradient(160deg, #27272A 0%, #202022 100%);">
+    <div id="kpxc-window" class="w-full max-w-5xl rounded-lg border border-kpxc-border bg-kpxc-window shadow-2xl overflow-hidden">
+      <header class="flex items-center gap-2 px-3 h-11 bg-kpxc-window border-b border-kpxc-mid select-none">
+        <svg class="shrink-0 text-kpxc-green" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+          <path d="M12 3l7 2.5v5.2c0 4.6-3 8.4-7 9.8-4-1.4-7-5.2-7-9.8V5.5L12 3z"/>
+          <circle cx="12" cy="10" r="1.6"/>
+          <path d="M12 11.6v4"/>
+        </svg>
+        <span class="truncate font-semibold text-sm">kpxc-agent — KeePassXC secrets for AI agents</span>
+        <span class="hidden sm:inline-flex items-center gap-1 rounded border border-kpxc-mid bg-kpxc-base px-2 py-0.5 text-xs" title="Active database">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
+          vault.kdbx
+        </span>
+        <button id="theme-switch" type="button" role="switch" class="ml-auto relative shrink-0 w-11 h-6 rounded-full bg-kpxc-button border border-kpxc-mid focus:outline-none focus:ring-1 focus:ring-kpxc-green" :aria-checked="$store.theme.mode === 'dark' ? 'true' : 'false'" aria-label="Toggle light or dark theme" @click="$store.theme.toggle()">
+          <span class="hint hint-light absolute left-1.5 top-1/2 -translate-y-1/2 text-kpxc-placeholder" aria-hidden="true">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          </span>
+          <span class="hint hint-dark absolute right-1.5 top-1/2 -translate-y-1/2 text-kpxc-placeholder" aria-hidden="true">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A8.5 8.5 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+          </span>
+          <span class="knob absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-kpxc-green flex items-center justify-center text-white">
+            <svg class="icon-light" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+            <svg class="icon-dark" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+          </span>
+        </button>
+        <div class="flex items-center gap-2 text-kpxc-placeholder" aria-hidden="true">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </div>
+      </header>
+      <div id="toolbar" class="flex items-center flex-wrap gap-2 px-3 py-1.5 bg-kpxc-base border-b border-kpxc-mid" aria-label="Badges and links">
+        <a href="https://skills.sh/max-win-at/keepassxc-cli-integration" title="skills.sh">
+          <img src="https://skills.sh/b/max-win-at/keepassxc-cli-integration" alt="skills.sh: max-win-at/keepassxc-cli-integration" loading="lazy" class="h-5 rounded-sm">
+        </a>
+        <a href="https://agentskill.sh/@max-win-at/keepassxc-secrets" title="agentskill.sh">
+          <img src="https://img.shields.io/badge/agentskill.sh-%40max--win--at%2Fkeepassxc--secrets-181717" alt="agentskill.sh: @max-win-at/keepassxc-secrets" loading="lazy" class="h-5 rounded-sm">
+        </a>
+        <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub repository">
+          <img src="https://img.shields.io/badge/github-max--win--at%2Fkeepassxc--cli--integration-181717" alt="GitHub: max-win-at/keepassxc-cli-integration" loading="lazy" class="h-5 rounded-sm">
+        </a>
+        <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub stars">
+          <img src="https://img.shields.io/github/stars/max-win-at/keepassxc-cli-integration" alt="GitHub stars" loading="lazy" class="h-5 rounded-sm">
+        </a>
+        <a href="https://github.com/max-win-at/keepassxc-cli-integration" title="GitHub forks">
+          <img src="https://img.shields.io/github/forks/max-win-at/keepassxc-cli-integration" alt="GitHub forks" loading="lazy" class="h-5 rounded-sm">
+        </a>
+      </div>
+      <div class="flex">
+        <nav id="groups-sidebar" class="hidden md:flex flex-col w-56 shrink-0 bg-kpxc-base border-r border-kpxc-mid select-none" aria-label="Groups">
+          <div class="px-3 py-2 text-xs uppercase tracking-wide text-kpxc-placeholder">Groups</div>
+          <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt"
+                  :class="$store.nav.active === 'section-overview' ? 'bg-kpxc-green text-white' : ''"
+                  @click="goSection('section-overview')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+            Overview
+          </button>
+          <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt"
+                  :class="$store.nav.active === 'section-install' ? 'bg-kpxc-green text-white' : ''"
+                  @click="goSection('section-install')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+            Install
+          </button>
+          
+          <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt"
+                  :class="$store.nav.active === 'section-about' ? 'bg-kpxc-green text-white' : ''"
+                  @click="goSection('section-about')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8.5v.5"/></svg>
+            About
+          </button>
+        </nav>
+        <div id="content-pane" class="flex-1 overflow-y-auto max-h-[75vh] scroll-smooth">
+          <section id="section-overview" class="p-6">
+            <h1 class="text-2xl font-bold tracking-tight">KeePassXC secrets for AI agents</h1>
+            <p class="mt-3 max-w-2xl leading-relaxed">
+              AI agents need credentials — for the box they are commissioning, the database they are
+              wiring up, the service they are deploying. <span class="font-semibold">kpxc-agent</span>
+              speaks the same end-to-end encrypted protocol as the KeePassXC browser extension — but
+              for the terminal, with no browser and no UI. Your agent asks your vault, the vault
+              answers, and the secret lives in process memory for exactly one command. It never
+              reaches a log, a transcript, or a dotfile.
+            </p>
+            <div class="mt-4 max-w-2xl rounded border border-kpxc-mid bg-kpxc-base">
+              <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid text-xs text-kpxc-placeholder">
+                <span>fetch a secret</span>
+                <button type="button" class="rounded px-2 py-0.5 text-xs bg-kpxc-button hover:bg-kpxc-alt font-medium" @click="copy('pw=$(kpxc-agent get-logins https://host.example --field password)', 'hero')" aria-label="Copy command">
+                  <span aria-live="polite"><template x-if="$store.nav.copied === 'hero'">Copied</template><template x-if="$store.nav.copied !== 'hero'">Copy</template></span>
+                </button>
+              </div>
+              <pre class="px-3 py-2 overflow-x-auto text-sm"><code>pw=$(kpxc-agent get-logins https://host.example --field password)</code></pre>
+            </div>
+            <p class="mt-3 text-sm text-kpxc-placeholder">Pair once; every later fetch, generation, or store runs unattended.</p>
+          </section>
+          <section id="section-install" class="px-6 pt-2" x-data="installTabs()">
+            <h2 class="text-lg font-semibold">Install</h2>
+            <p class="mt-1 text-sm text-kpxc-placeholder">The tool ships inside the agent skill — installing the skill installs the CLI.</p>
+            <div class="mt-3 flex gap-1 border-b border-kpxc-mid" role="tablist" aria-label="Install methods">
+              <button type="button" role="tab" @click="tab = 'skills'" :aria-selected="tab === 'skills'"
+                      class="px-3 py-1.5 text-sm rounded-t -mb-px border border-b-0"
+                      :class="tab === 'skills' ? 'bg-kpxc-alt border-kpxc-mid' : 'text-kpxc-placeholder hover:bg-kpxc-alt border-transparent'">skills.sh (Vercel)</button>
+              <button type="button" role="tab" @click="tab = 'agentskill'" :aria-selected="tab === 'agentskill'"
+                      class="px-3 py-1.5 text-sm rounded-t -mb-px border border-b-0"
+                      :class="tab === 'agentskill' ? 'bg-kpxc-alt border-kpxc-mid' : 'text-kpxc-placeholder hover:bg-kpxc-alt border-transparent'">agentskill.sh</button>
+              <button type="button" role="tab" @click="tab = 'standalone'" :aria-selected="tab === 'standalone'"
+                      class="px-3 py-1.5 text-sm rounded-t -mb-px border border-b-0"
+                      :class="tab === 'standalone' ? 'bg-kpxc-alt border-kpxc-mid' : 'text-kpxc-placeholder hover:bg-kpxc-alt border-transparent'">Standalone CLI</button>
+            </div>
+
+            <div x-show="tab === 'skills'" x-cloak class="pt-4" role="tabpanel">
+              <p class="max-w-2xl text-sm leading-relaxed" x-text="tabs.skills.desc"></p>
+              <div class="mt-3 max-w-2xl rounded border border-kpxc-mid bg-kpxc-base">
+                <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid text-xs text-kpxc-placeholder">
+                  <span>via skills.sh</span>
+                  <button type="button" class="rounded px-2 py-0.5 text-xs bg-kpxc-button hover:bg-kpxc-alt font-medium" @click="copy(tabs.skills.cmd, 'install-skills')" aria-label="Copy skills.sh install command">
+                    <span aria-live="polite"><template x-if="$store.nav.copied === 'install-skills'">Copied</template><template x-if="$store.nav.copied !== 'install-skills'">Copy</template></span>
+                  </button>
+                </div>
+                <pre class="px-3 py-2 overflow-x-auto text-sm"><code x-text="tabs.skills.cmd"></code></pre>
+              </div>
+            </div>
+
+            <div x-show="tab === 'agentskill'" x-cloak class="pt-4" role="tabpanel">
+              <p class="max-w-2xl text-sm leading-relaxed" x-text="tabs.agentskill.desc"></p>
+              <div class="mt-3 max-w-2xl rounded border border-kpxc-mid bg-kpxc-base">
+                <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid text-xs text-kpxc-placeholder">
+                  <span>via agentskill.sh</span>
+                  <button type="button" class="rounded px-2 py-0.5 text-xs bg-kpxc-button hover:bg-kpxc-alt font-medium" @click="copy(tabs.agentskill.cmd, 'install-agentskill')" aria-label="Copy agentskill.sh install command">
+                    <span aria-live="polite"><template x-if="$store.nav.copied === 'install-agentskill'">Copied</template><template x-if="$store.nav.copied !== 'install-agentskill'">Copy</template></span>
+                  </button>
+                </div>
+                <pre class="px-3 py-2 overflow-x-auto text-sm"><code x-text="tabs.agentskill.cmd"></code></pre>
+              </div>
+            </div>
+
+            <div x-show="tab === 'standalone'" x-cloak class="pt-4" role="tabpanel">
+              <p class="max-w-2xl text-sm leading-relaxed" x-text="tabs.standalone.desc"></p>
+              <div class="mt-3 max-w-2xl rounded border border-kpxc-mid bg-kpxc-base">
+                <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid text-xs text-kpxc-placeholder">
+                  <span>standalone CLI</span>
+                  <button type="button" class="rounded px-2 py-0.5 text-xs bg-kpxc-button hover:bg-kpxc-alt font-medium" @click="copy(tabs.standalone.cmd, 'install-standalone')" aria-label="Copy standalone install commands">
+                    <span aria-live="polite"><template x-if="$store.nav.copied === 'install-standalone'">Copied</template><template x-if="$store.nav.copied !== 'install-standalone'">Copy</template></span>
+                  </button>
+                </div>
+                <pre class="px-3 py-2 overflow-x-auto text-sm"><code x-text="tabs.standalone.cmd"></code></pre>
+              </div>
+            </div>
+
+            
+
+            <p class="mt-4 pb-4 text-sm text-kpxc-placeholder"><span class="font-medium">Prerequisites</span> — <code class="text-sm">jq</code>, <code class="text-sm">python3</code> (stdlib only), and <code class="text-sm">libsodium</code>, plus KeePassXC running with <span class="font-medium">Browser Integration</span> enabled. Run <code class="text-sm">kpxc-agent doctor</code> to check everything at once.</p>
+          </section>
+
+          <section id="section-about" class="px-6 pt-2">
+            <h2 class="text-lg font-semibold">About</h2>
+            <p class="mt-1 max-w-2xl text-sm leading-relaxed">
+              Encrypted like the browser extension — kpxc-agent uses the same
+              <code class="text-sm">crypto_box</code> end-to-end channel as the keepassxc-browser
+              extension; KeePassXC stays unmodified, and its own prompts and access settings still apply.
+            </p>
+            <p class="mt-3 pb-6 text-sm">
+              More at <a href="https://max-w.in" class="text-kpxc-link hover:underline font-medium">max-w.in</a>
+              · <a href="https://github.com/max-win-at/keepassxc-cli-integration/blob/main/LICENSE" class="text-kpxc-link hover:underline">MIT license</a>
+            </p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module">
+    import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/module.esm.js';
+
+    let stored = null;
+    try { stored = window.localStorage.getItem('kpxc-theme'); } catch (e) { /* private mode */ }
+    Alpine.store('theme', {
+      mode: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+      explicit: stored === 'light' || stored === 'dark',
+      toggle() {
+        this.mode = this.mode === 'dark' ? 'light' : 'dark';
+        this.explicit = true;
+        document.documentElement.classList.toggle('dark', this.mode === 'dark');
+        try { window.localStorage.setItem('kpxc-theme', this.mode); } catch (e) { /* private mode */ }
+      },
+    });
+
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+      const theme = Alpine.store('theme');
+      if (theme.explicit) { return; }
+      theme.mode = e.matches ? 'dark' : 'light';
+      document.documentElement.classList.toggle('dark', e.matches);
+    });
+
+    Alpine.store('nav', { active: 'section-overview', copied: '' });
+
+    window.goSection = function (id) {
+      Alpine.store('nav').active = id;
+      const el = document.getElementById(id);
+      if (el) { el.scrollIntoView({ behavior: 'smooth' }); }
+    };
+
+    window.copyTimer = null;
+    window.copy = async function (text, btnId) {
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch (e) { /* insecure context or unsupported */ }
+      if (!ok) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e2) { /* unsupported */ }
+        ta.remove();
+      }
+      const nav = Alpine.store('nav');
+      nav.copied = btnId;
+      clearTimeout(window.copyTimer);
+      window.copyTimer = setTimeout(() => { nav.copied = ''; }, 1500);
+    };
+
+    window.installTabs = function () {
+      const tabs = {
+        skills: {
+          label: 'skills.sh (Vercel)',
+          desc: 'Any agent supported by the skills CLI: Claude Code, Cursor, Codex, Copilot, Windsurf, …',
+          cmd: 'npx skills add max-win-at/keepassxc-cli-integration --skill keepassxc-secrets',
+        },
+        agentskill: {
+          label: 'agentskill.sh',
+          desc: 'Harnesses with the /learn command: Claude Code, Copilot CLI, Gemini CLI, Cursor, Codex CLI, … '
+            + 'If your harness does not have /learn yet, add it first with npx @agentskill.sh/cli@latest setup.',
+          cmd: '/learn @max-win-at/keepassxc-secrets',
+        },
+        standalone: {
+          label: 'Standalone CLI',
+          desc: 'Clone the repository, symlink the script onto your PATH, and check the environment.',
+          cmd: 'git clone https://github.com/max-win-at/keepassxc-cli-integration.git\n'
+            + 'ln -s "$PWD/keepassxc-cli-integration/skills/keepassxc-secrets/scripts/kpxc-agent" ~/.local/bin/kpxc-agent\n'
+            + 'kpxc-agent doctor',
+        },
+      };
+      return { tab: 'skills', tabs };
+    };
+
+    Alpine.start();
+  </script>
+</body>
+</html>
