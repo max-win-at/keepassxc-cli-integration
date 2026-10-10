@@ -275,4 +275,5 @@ for the exact commands for Linux/macOS and Windows/WSL clients.
 ## Going deeper
 
 - **`references/commands.md`** — every command, all options, transport overrides.
+- **`references/architecture.md`** — architecture and security model, for developers and security auditors.
 - Wire protocol (rarely needed): the repo's `keepassxc-cli-agent-protocol.md`.
