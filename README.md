@@ -1,7 +1,7 @@
 # kpxc-agent — KeePassXC secrets for AI agents
 
 [![skills.sh](https://skills.sh/b/max-win-at/keepassxc-cli-integration)](https://skills.sh/max-win-at/keepassxc-cli-integration)
-[![agentskill.sh](https://img.shields.io/badge/agentskill.sh-%40maxwin%2Fkeepassxc--secrets-181717)](https://agentskill.sh/@maxwin/keepassxc-secrets)
+[![agentskill.sh](https://img.shields.io/badge/agentskill.sh-%40maxwin%2Fkeepassxc--secrets-181717)](https://agentskill.sh/@max-win-at/keepassxc-secrets)
 
 AI agents need credentials — for the box they are commissioning, the database they
 are wiring up, the service they are deploying. The usual answers all put the secret
@@ -68,7 +68,7 @@ npx skills add max-win-at/keepassxc-cli-integration --skill keepassxc-secrets
 command (Claude Code, Copilot CLI, Gemini CLI, Cursor, Codex CLI, …):
 
 ```
-/learn @maxwin/keepassxc-secrets
+/learn @max-win-at/keepassxc-secrets
 ```
 
 If your harness does not have `/learn` yet, add it first with
