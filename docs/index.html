@@ -91,6 +91,61 @@
         <label class="ml-auto flex items-center gap-2 sr-only" for="search-input">Search install methods</label>
         <input id="search-input" type="search" x-model="search.q" placeholder="Search…" class="ml-auto w-40 sm:w-52 rounded border border-kpxc-mid dark:border-kpxc-mid bg-kpxc-window dark:bg-kpxc-window placeholder-kpxc-placeholder dark:placeholder-kpxc-placeholder px-2 py-1 text-sm outline-none focus:border-kpxc-green dark:focus:border-kpxc-green focus:ring-1 focus:ring-kpxc-green" autocomplete="off">
       </div>
+      <div class="flex">
+        <nav id="groups-sidebar" class="hidden md:flex flex-col w-56 shrink-0 bg-kpxc-base dark:bg-kpxc-base border-r border-kpxc-mid dark:border-kpxc-mid select-none" aria-label="Groups">
+          <div class="px-3 py-2 text-xs uppercase tracking-wide text-kpxc-placeholder dark:text-kpxc-placeholder">Groups</div>
+          <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt dark:hover:bg-kpxc-alt"
+                  :class="nav.active === 'section-overview' ? 'bg-kpxc-green dark:bg-kpxc-green text-white' : ''"
+                  @click="goSection('section-overview')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+            Overview
+          </button>
+          <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt dark:hover:bg-kpxc-alt"
+                  :class="nav.active === 'section-install' ? 'bg-kpxc-green dark:bg-kpxc-green text-white' : ''"
+                  @click="goSection('section-install')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+            Install
+          </button>
+          <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt dark:hover:bg-kpxc-alt"
+                  :class="nav.active === 'section-badges' ? 'bg-kpxc-green dark:bg-kpxc-green text-white' : ''"
+                  @click="goSection('section-badges')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="9" r="5"/><path d="M8.5 13.5L7 21l5-3 5 3-1.5-7.5"/></svg>
+            Badges &amp; Links
+          </button>
+          <button type="button" class="flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-kpxc-alt dark:hover:bg-kpxc-alt"
+                  :class="nav.active === 'section-about' ? 'bg-kpxc-green dark:bg-kpxc-green text-white' : ''"
+                  @click="goSection('section-about')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8.5v.5"/></svg>
+            About
+          </button>
+        </nav>
+        <div id="content-pane" class="flex-1 overflow-y-auto max-h-[75vh] scroll-smooth">
+          <section id="section-overview" class="p-6">
+            <h1 class="text-2xl font-bold tracking-tight">KeePassXC secrets for AI agents</h1>
+            <p class="mt-3 max-w-2xl leading-relaxed">
+              AI agents need credentials — for the box they are commissioning, the database they are
+              wiring up, the service they are deploying. <span class="font-semibold">kpxc-agent</span>
+              speaks the same end-to-end encrypted protocol as the KeePassXC browser extension — but
+              for the terminal, with no browser and no UI. Your agent asks your vault, the vault
+              answers, and the secret lives in process memory for exactly one command. It never
+              reaches a log, a transcript, or a dotfile.
+            </p>
+            <div class="mt-4 max-w-2xl rounded border border-kpxc-mid dark:border-kpxc-mid bg-kpxc-base dark:bg-kpxc-base">
+              <div class="flex items-center justify-between px-3 py-1 border-b border-kpxc-mid dark:border-kpxc-mid text-xs text-kpxc-placeholder dark:text-kpxc-placeholder">
+                <span>fetch a secret</span>
+                <button type="button" class="rounded px-2 py-0.5 text-xs bg-kpxc-button dark:bg-kpxc-button hover:bg-kpxc-alt dark:hover:bg-kpxc-alt font-medium" @click="copy('pw=$(kpxc-agent get-logins https://host.example --field password)', 'hero')" aria-label="Copy command">
+                  <span aria-live="polite"><template x-if="nav.copied === 'hero'">Copied</template><template x-if="nav.copied !== 'hero'">Copy</template></span>
+                </button>
+              </div>
+              <pre class="px-3 py-2 overflow-x-auto text-sm"><code>pw=$(kpxc-agent get-logins https://host.example --field password)</code></pre>
+            </div>
+            <p class="mt-3 text-sm text-kpxc-placeholder dark:text-kpxc-placeholder">Pair once; every later fetch, generation, or store runs unattended.</p>
+          </section>
+          <section id="section-install" class="px-6 pt-2"></section>
+          <section id="section-badges" class="px-6 pt-2"></section>
+          <section id="section-about" class="px-6 pt-2"></section>
+        </div>
+      </div>
     </div>
   </div>
   <script type="module">
@@ -117,6 +172,37 @@
     });
 
     Alpine.store('search', { q: '' });
+    Alpine.store('nav', { active: 'section-overview', copied: '' });
+
+    window.goSection = function (id) {
+      Alpine.store('nav').active = id;
+      const el = document.getElementById(id);
+      if (el) { el.scrollIntoView({ behavior: 'smooth' }); }
+    };
+
+    window.copyTimer = null;
+    window.copy = async function (text, btnId) {
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch (e) { /* insecure context or unsupported */ }
+      if (!ok) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e2) { /* unsupported */ }
+        ta.remove();
+      }
+      const nav = Alpine.store('nav');
+      nav.copied = btnId;
+      clearTimeout(window.copyTimer);
+      window.copyTimer = setTimeout(() => { nav.copied = ''; }, 1500);
+    };
 
     Alpine.start();
   </script>
