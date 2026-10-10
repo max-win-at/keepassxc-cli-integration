@@ -8,8 +8,9 @@ set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 ROOT="$(dirname "$HERE")"
-CHANNEL="$ROOT/lib/kpxc_channel.py"
-AGENT="$ROOT/kpxc-agent"
+SCRIPTS="$ROOT/skills/keepassxc-secrets/scripts"
+CHANNEL="$SCRIPTS/lib/kpxc_channel.py"
+AGENT="$SCRIPTS/kpxc-agent"
 PY="${KPXC_PYTHON:-python3}"
 
 pass=0; fail=0
