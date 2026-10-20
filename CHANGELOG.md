@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-20
+
 ### Added
 
+- `get-logins --field string:NAME` reads an entry's custom field `KPH: NAME`. A field
+  that KeePassXC did not return exits 6 and names the two conditions: the `KPH: `
+  prefix and the "Return advanced string fields" setting.
+- `get-logins --name TITLE` keeps only the match whose entry title is exactly `TITLE`.
+  KeePassXC matches by host and ignores the path, and falls back to a parent domain for
+  a subdomain with no entry; the title is what tells such matches apart.
+- `--json` and `probe --json` list the names of an entry's custom fields (`fields`),
+  never their values.
 - `CHANGELOG.md` — this changes journal.
 - `tests/README.md` — a guide to the offline self-test suite, scoped to the tests.
 - `references/architecture.md` (in the skill) — technical reference for developers
@@ -95,7 +105,8 @@ contract) is now frozen.
 - The `keepassxc-secrets` agent skill bundling the tool for AI harnesses.
 - Symlink- and PATH-safe script resolution via `readlink -f`.
 
-[Unreleased]: https://github.com/max-win-at/keepassxc-cli-integration/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/max-win-at/keepassxc-cli-integration/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/max-win-at/keepassxc-cli-integration/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/max-win-at/keepassxc-cli-integration/compare/v0.4.1...v1.0.0
 [0.4.1]: https://github.com/max-win-at/keepassxc-cli-integration/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/max-win-at/keepassxc-cli-integration/compare/v0.3.0...v0.4.0

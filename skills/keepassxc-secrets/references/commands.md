@@ -29,9 +29,22 @@ exhaustive list for edge cases.
 - `--http-auth` — match HTTP Basic/Digest auth entries.
 - `--field username|password|name|uuid|totp` — print exactly one raw value. **The only
   way a secret leaves the tool**; capture it (`pw=$(…)`), never run it bare.
-- `--json` — matches as **metadata only**: `uuid`, `name`, `login`, `group`, `expired`.
-  Passwords and TOTPs are excluded by an allowlist and cannot appear here. For choosing
-  among multiple matches, and safe to show the user.
+- `--field string:NAME` — print the entry's custom field `KPH: NAME`. KeePassXC hands a
+  custom field to a browser-protocol client only when its name starts with `KPH: ` and
+  **Settings → Browser Integration → Advanced → "Return advanced string fields"** is
+  enabled. A field that did not arrive exits 6 and names both conditions — never an
+  empty string with exit 0.
+- `--json` — matches as **metadata only**: `uuid`, `name`, `login`, `group`, `expired`,
+  and `fields`, the names of the custom fields that arrived (without `KPH: `). Passwords,
+  TOTPs and field values are excluded by an allowlist and cannot appear here. For
+  choosing among multiple matches, and safe to show the user.
+- `--name TITLE` — keep only the match whose entry title is exactly `TITLE`; none is
+  exit 6. KeePassXC matches a URL **by host and ignores the path**: every entry on a
+  host comes back for any path on it, and a lookup for a subdomain with no entry of its
+  own falls back to the parent domain's entries. The title is the only field in the
+  reply that tells such matches apart, so a caller that keys entries by host and titles
+  each one after it (what `set-login` does by default) gets exact lookups with
+  `get-logins <url> --name <host>`.
 - `--entry-uuid UUID` / `--index N` — pick one match (typically a `uuid` taken from a
   `--json` listing) before applying `--field` or the default output. `--index` is
   0-based; out of range is exit 64, an unknown uuid is exit 6.

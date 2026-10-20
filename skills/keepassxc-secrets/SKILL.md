@@ -156,7 +156,10 @@ kpxc-agent get-logins https://host.example --json
 # [{"uuid":"a1…","name":"Box prod","login":"admin"},{"uuid":"b2…","name":"Box staging",…}]
 pw=$(kpxc-agent get-logins https://host.example --field password --entry-uuid a1…)
 ```
-`--index N` (0-based) works too. Without a selector, `--field` reads the first match and
+`--index N` (0-based) works too, and `--name TITLE` keeps only the entry with exactly
+that title. KeePassXC matches by **host** and ignores the URL's path, so two entries
+that differ only in path both come back; when the caller knows the entry's title, pass
+`--name` rather than trusting the first match. Without a selector, `--field` reads the first match and
 the default output switches to `KPXC_COUNT=N` plus indexed `KPXC_USERNAME_0` /
 `KPXC_PASSWORD_0` …. If the entry names alone don't make the right choice obvious, show
 the user the `--json` list and ask — it contains no secrets.
@@ -175,6 +178,13 @@ eval "$(kpxc-agent generate-password)"   # sets $KPXC_PASSWORD, in memory only
 ```bash
 kpxc-agent set-login https://host.example --username svc --password "$KPXC_PASSWORD"
 ```
+
+**Read a custom field** (the entry's `KPH: NAME` field; KeePassXC returns these only
+with "Return advanced string fields" enabled — a missing one exits 6):
+```bash
+tok=$(kpxc-agent get-logins https://host.example --field string:API_TOKEN)
+```
+`--json` lists which custom fields arrived, by name only.
 
 **Read a TOTP** for an entry you already located (uuid comes from `get-logins --field
 uuid`). Like generate-password it prints `KPXC_TOTP=…`, so `eval` it too:

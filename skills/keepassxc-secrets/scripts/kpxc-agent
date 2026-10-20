@@ -62,10 +62,14 @@ normalize_url() { case "$1" in *://*) printf '%s' "$1";; *) printf 'https://%s' 
 ACTIVE_DB_HASH=""
 
 # Non-secret projection of an entries array. An explicit ALLOWLIST, not a blocklist:
-# `password`, `totp`, `stringFields` and any field KeePassXC adds in a later version
-# can never reach stdout through --json/probe. Secrets leave this tool only through
-# --field, which the caller is expected to capture into a shell variable.
-ENTRY_META='[.[] | {uuid, name, login, group, expired} | with_entries(select(.value != null))]'
+# `password`, `totp`, the VALUES of `stringFields` and any field KeePassXC adds in a
+# later version can never reach stdout through --json/probe. Custom fields appear by
+# NAME only (`fields`, without KeePassXC's "KPH: " prefix), so a caller can see which
+# ones an entry carries. Secrets leave this tool only through --field, which the
+# caller is expected to capture into a shell variable.
+ENTRY_META='[.[] | {uuid, name, login, group, expired,
+    fields: (if .stringFields then [.stringFields[] | keys[] | sub("^KPH: "; "")] else null end)}
+  | with_entries(select(.value != null))]'
 
 # Print a plaintext message to stderr for --debug with secret-bearing fields masked.
 # SKILL.md tells agents to retry with --debug, so this must never echo a password.
@@ -321,8 +325,11 @@ Commands:
   associate                       One-time pairing; prints KPXC_ASSOC_ID / KPXC_ASSOC_KEY exports
   test                            Verify the current association against the open database
   get-logins URL [opts]           Fetch credentials matching URL
-      --submit-url URL  --http-auth  --field username|password|name|uuid|totp
-      --json            List matches as metadata only (never a password)
+      --submit-url URL  --http-auth
+      --field F         Print one raw value: username|password|name|uuid|totp, or
+                        string:NAME for the custom field "KPH: NAME"
+      --json            List matches as metadata only (never a password or field value)
+      --name TITLE      Keep only the match whose entry title is exactly TITLE
       --entry-uuid U    Pick one match by uuid (from a --json listing)
       --index N         Pick the Nth match (0-based)
       --allow-empty     Exit 0 instead of 6 when nothing matches
@@ -431,7 +438,7 @@ die_no_match() {
 
 cmd_get_logins() {
     local url="" submit="" httpauth="" field="" want_json=0
-    local sel_uuid="" sel_index="" allow_empty=0
+    local sel_uuid="" sel_index="" sel_name="" allow_empty=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --submit-url) submit="${2:?}"; shift 2;;
@@ -440,6 +447,7 @@ cmd_get_logins() {
             --json)       want_json=1; shift;;
             --entry-uuid) sel_uuid="${2:?}"; shift 2;;
             --index)      sel_index="${2:?}"; shift 2;;
+            --name)       sel_name="${2:?}"; shift 2;;
             --allow-empty) allow_empty=1; shift;;
             -*)           die "$EX_USAGE" "get-logins: unknown option $1";;
             *)            url="$1"; shift;;
@@ -449,7 +457,8 @@ cmd_get_logins() {
     url=$(normalize_url "$url")
     case "$field" in
         ""|username|password|name|uuid|totp) ;;
-        *) die "$EX_USAGE" "get-logins: unknown --field '$field' (use username|password|name|uuid|totp)";;
+        string:?*) ;;
+        *) die "$EX_USAGE" "get-logins: unknown --field '$field' (use username|password|name|uuid|totp|string:NAME)";;
     esac
     [[ -z "$sel_uuid" || -z "$sel_index" ]] \
         || die "$EX_USAGE" "get-logins: --entry-uuid and --index are mutually exclusive"
@@ -465,6 +474,20 @@ cmd_get_logins() {
     if [[ "$count" == 0 && "$allow_empty" != 1 ]]; then
         [[ "$want_json" == 1 ]] && echo "[]"
         die_no_match "$url"
+    fi
+
+    # --name keeps only entries whose title is exactly NAME. KeePassXC matches a URL by
+    # its host and ignores the path, so every entry on one host comes back for any path
+    # on it; the title is the only thing in the reply that tells them apart. A caller
+    # that titles each entry after its own lookup URL gets an exact match this way.
+    if [[ -n "$sel_name" ]]; then
+        entries=$(jq -c --arg n "$sel_name" '[.[] | select(.name == $n)]' <<<"$entries")
+        if [[ "$(jq 'length' <<<"$entries")" == 0 ]]; then
+            if [[ "$allow_empty" == 1 ]]; then return 0; fi
+            [[ "$want_json" == 1 ]] && echo "[]"
+            die "$EX_NOTFOUND" "none of the $count match(es) for $url is titled '$sel_name' (db ${ACTIVE_DB_HASH:0:12}). KeePassXC matched by host; check the entry's title. Diagnose with: kpxc-agent probe $url"
+        fi
+        count=$(jq 'length' <<<"$entries")
     fi
 
     # Narrow to one entry when the caller picked it from a previous --json listing.
@@ -486,6 +509,17 @@ cmd_get_logins() {
         case "$field" in
             username) sel='.login';;  password) sel='.password';;
             name)     sel='.name';;   uuid)     sel='.uuid';;  totp) sel='.totp';;
+            string:*)
+                # A custom field reaches a browser-protocol client only when its name
+                # starts with "KPH: " and KeePassXC's "Return advanced string fields"
+                # is enabled. A missing field is a miss (exit 6), never an empty value.
+                local fname="${field#string:}"
+                if ! jq -e --arg k "KPH: $fname" \
+                        '.[0] | (.stringFields // []) | map(has($k)) | any' >/dev/null <<<"$entries"; then
+                    die "$EX_NOTFOUND" "entry '$(jq -r '.[0].name // "?"' <<<"$entries")' has no custom field '$fname' as KeePassXC returned it. The field must be named 'KPH: $fname', and KeePassXC must have 'Return advanced string fields' enabled (Settings > Browser Integration > Advanced)."
+                fi
+                jq -r --arg k "KPH: $fname" '.[0] | [(.stringFields // [])[] | select(has($k)) | .[$k]] | .[0]' <<<"$entries"
+                return 0;;
         esac
         jq -r ".[0] | (${sel} // \"\")" <<<"$entries"
         return 0

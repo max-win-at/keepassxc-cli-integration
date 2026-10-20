@@ -65,6 +65,8 @@ if _switch_after:
 # get-logins is URL-aware so the miss and multi-match paths are reachable:
 #   https://box.example   -> one entry
 #   https://multi.example -> two entries (choosing among matches)
+#   https://fields.example -> two entries with custom fields, as KeePassXC returns every
+#                            entry on a host whatever the path (--name, --field string:)
 #   anything else         -> errorCode 15, which the real KeePassXC returns for "no
 #                            logins found" and which must surface as exit 6, not exit 0.
 ENTRIES = {
@@ -73,6 +75,11 @@ ENTRIES = {
     "https://multi.example": [
         {"login": "admin", "name": "Box prod", "password": "first-secret", "uuid": "u1"},
         {"login": "deploy", "name": "Box staging", "password": "second-secret", "uuid": "u2"}],
+    "https://fields.example": [
+        {"login": "svc", "name": "https://fields.example/a", "password": "pw-a", "uuid": "f1",
+         "stringFields": [{"KPH: DB_PASSWORD": "db-secret-a"}, {"KPH: API_TOKEN": "tok-a"}]},
+        {"login": "svc", "name": "https://fields.example/b", "password": "pw-b", "uuid": "f2",
+         "stringFields": [{"KPH: DB_PASSWORD": "db-secret-b"}]}],
 }
 # When KPXC_MOCK_LOCKED is set, start with no database "open": the first
 # get-databasehash returns errorCode 1 (as a locked/closed KeePassXC does), then a
