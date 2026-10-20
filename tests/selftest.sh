@@ -145,6 +145,38 @@ if command -v jq >/dev/null 2>&1; then
     [[ "$rc" == 0 ]] && ok "e2e: --allow-empty restores exit 0 for existence checks" \
         || bad "e2e: --allow-empty (rc=$rc)"
 
+    # KeePassXC matches by host and ignores the path, so both entries on fields.example come
+    # back for any path. --name picks the one whose title is exact; a wrong title is a miss.
+    na=$("$AGENT" get-logins https://fields.example --name https://fields.example/b --field password 2>/dev/null) || true
+    rc=0; "$AGENT" get-logins https://fields.example --name https://fields.example/c --field password >/dev/null 2>&1 || rc=$?
+    if [[ "$na" == "pw-b" && "$rc" == 6 ]]; then
+        ok "e2e: --name selects the exactly titled entry; an unknown title exits 6"
+    else
+        bad "e2e: --name (na=$na rc=$rc)"
+    fi
+
+    # Custom fields: read by name through the "KPH: " prefix; a missing one exits 6 and
+    # names the KeePassXC setting, never printing an empty string as if it were a value.
+    sa=$("$AGENT" get-logins https://fields.example --name https://fields.example/a --field string:API_TOKEN 2>/dev/null) || true
+    sb=$("$AGENT" get-logins https://fields.example --name https://fields.example/b --field string:DB_PASSWORD 2>/dev/null) || true
+    rc=0; sm=$("$AGENT" get-logins https://fields.example --name https://fields.example/b --field string:API_TOKEN 2>/tmp/kpxc_sm.$$) || rc=$?
+    if [[ "$sa" == "tok-a" && "$sb" == "db-secret-b" && "$rc" == 6 && -z "$sm" ]] \
+        && grep -q 'Return advanced string fields' /tmp/kpxc_sm.$$; then
+        ok "e2e: --field string:NAME reads a KPH: field; a missing one exits 6"
+    else
+        bad "e2e: string fields (sa=$sa sb=$sb rc=$rc sm=$sm)"
+    fi
+    rm -f /tmp/kpxc_sm.$$
+
+    # --json names custom fields but never carries their values.
+    fj=$("$AGENT" get-logins https://fields.example --json 2>/dev/null) || true
+    if [[ "$(jq -c '.[0].fields' <<<"$fj" 2>/dev/null)" == '["DB_PASSWORD","API_TOKEN"]' ]] \
+        && ! grep -qE 'db-secret|tok-a|pw-a|KPH' <<<"$fj"; then
+        ok "e2e: --json lists custom field names, never their values"
+    else
+        bad "e2e: --json field names (fj=$fj)"
+    fi
+
     rc=0; mj=$("$AGENT" get-logins https://nope.example --json 2>/dev/null) || rc=$?
     [[ "$rc" == 6 && "$mj" == "[]" ]] && ok "e2e: --json miss prints [] and still exits 6" \
         || bad "e2e: --json miss (rc=$rc mj=$mj)"
