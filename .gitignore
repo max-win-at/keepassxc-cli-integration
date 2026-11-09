@@ -17,3 +17,6 @@ __pycache__
 *.tmp
 # agent-tool local settings (machine-specific)
 .agents/settings.local.json
+
+# Pi harness local state, never commit
+.pi/
